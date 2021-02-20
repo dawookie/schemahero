@@ -3,6 +3,7 @@ package generate
 import (
 	"fmt"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -40,29 +41,29 @@ func (g *Generator) RunSync() error {
 		db = mysqlDb
 	}
 
-	tableNames, err := db.ListTables()
+	tables, err := db.ListTables()
 	if err != nil {
 		return errors.Wrap(err, "failed to list tables")
 	}
 
 	filesWritten := make([]string, 0, 0)
-	for _, tableName := range tableNames {
-		primaryKey, err := db.GetTablePrimaryKey(tableName)
+	for _, table := range tables {
+		primaryKey, err := db.GetTablePrimaryKey(table.Name)
 		if err != nil {
 			return errors.Wrap(err, "failed to get table primary key")
 		}
 
-		foreignKeys, err := db.ListTableForeignKeys(g.DBName, tableName)
+		foreignKeys, err := db.ListTableForeignKeys(g.DBName, table.Name)
 		if err != nil {
 			return errors.Wrap(err, "failed to list table foreign keys")
 		}
 
-		indexes, err := db.ListTableIndexes(g.DBName, tableName)
+		indexes, err := db.ListTableIndexes(g.DBName, table.Name)
 		if err != nil {
 			return errors.Wrap(err, "failed to list table indexes")
 		}
 
-		columns, err := db.GetTableSchema(tableName)
+		columns, err := db.GetTableSchema(table.Name)
 		if err != nil {
 			return errors.Wrap(err, "failed to get table schema")
 		}
@@ -71,18 +72,30 @@ func (g *Generator) RunSync() error {
 		if primaryKey != nil {
 			primaryKeyColumns = primaryKey.Columns
 		}
-		tableYAML, err := generateTableYAML(g.Driver, g.DBName, tableName, primaryKeyColumns, foreignKeys, indexes, columns)
+		tableYAML, err := generateTableYAML(g.Driver, g.DBName, table, primaryKeyColumns, foreignKeys, indexes, columns)
 		if err != nil {
 			return errors.Wrap(err, "failed to generate table yaml")
 		}
 
+		// ensure that outputdir exists
+		fi, err := os.Stat(g.OutputDir)
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(g.OutputDir, 0755); err != nil {
+				return errors.Wrap(err, "failed to create output dir")
+			}
+		} else if err != nil {
+			return errors.Wrap(err, "failed to check if output dir exists")
+		} else if !fi.IsDir() {
+			return errors.New("output dir already exists and is not a directory")
+		}
+
 		// If there was a outputdir set, write it, else print it
 		if g.OutputDir != "" {
-			if err := ioutil.WriteFile(filepath.Join(g.OutputDir, fmt.Sprintf("%s.yaml", sanitizeName(tableName))), []byte(tableYAML), 0644); err != nil {
+			if err := ioutil.WriteFile(filepath.Join(g.OutputDir, fmt.Sprintf("%s.yaml", sanitizeName(table.Name))), []byte(tableYAML), 0644); err != nil {
 				return err
 			}
 
-			filesWritten = append(filesWritten, fmt.Sprintf("./%s.yaml", sanitizeName(tableName)))
+			filesWritten = append(filesWritten, fmt.Sprintf("./%s.yaml", sanitizeName(table.Name)))
 		} else {
 
 			fmt.Println(tableYAML)
@@ -110,22 +123,30 @@ func (g *Generator) RunSync() error {
 	return nil
 }
 
-func generateTableYAML(driver string, dbName string, tableName string, primaryKey []string, foreignKeys []*types.ForeignKey, indexes []*types.Index, columns []*types.Column) (string, error) {
-	schemaForeignKeys := make([]*schemasv1alpha4.SQLTableForeignKey, 0, 0)
+func generateTableYAML(driver string, dbName string, table *types.Table, primaryKey []string, foreignKeys []*types.ForeignKey, indexes []*types.Index, columns []*types.Column) (string, error) {
+	if driver == "mysql" {
+		return generateMysqlTableYAML(dbName, table, primaryKey, foreignKeys, indexes, columns)
+	}
+
+	return generatePostgresqlTableYAML(driver, dbName, table, primaryKey, foreignKeys, indexes, columns)
+}
+
+func generateMysqlTableYAML(dbName string, table *types.Table, primaryKey []string, foreignKeys []*types.ForeignKey, indexes []*types.Index, columns []*types.Column) (string, error) {
+	schemaForeignKeys := make([]*schemasv1alpha4.MysqlTableForeignKey, 0, 0)
 	for _, foreignKey := range foreignKeys {
-		schemaForeignKey := types.ForeignKeyToSchemaForeignKey(foreignKey)
+		schemaForeignKey := types.ForeignKeyToMysqlSchemaForeignKey(foreignKey)
 		schemaForeignKeys = append(schemaForeignKeys, schemaForeignKey)
 	}
 
-	schemaIndexes := make([]*schemasv1alpha4.SQLTableIndex, 0, 0)
+	schemaIndexes := make([]*schemasv1alpha4.MysqlTableIndex, 0, 0)
 	for _, index := range indexes {
-		schemaIndex := types.IndexToSchemaIndex(index)
+		schemaIndex := types.IndexToMysqlSchemaIndex(index)
 		schemaIndexes = append(schemaIndexes, schemaIndex)
 	}
 
-	schemaTableColumns := make([]*schemasv1alpha4.SQLTableColumn, 0, 0)
+	schemaTableColumns := make([]*schemasv1alpha4.MysqlTableColumn, 0, 0)
 	for _, column := range columns {
-		schemaTableColumn, err := types.ColumnToSchemaColumn(column)
+		schemaTableColumn, err := types.ColumnToMysqlSchemaColumn(column)
 		if err != nil {
 			fmt.Printf("%#v\n", err)
 			return "", err
@@ -134,24 +155,22 @@ func generateTableYAML(driver string, dbName string, tableName string, primaryKe
 		schemaTableColumns = append(schemaTableColumns, schemaTableColumn)
 	}
 
-	tableSchema := &schemasv1alpha4.SQLTableSchema{
-		PrimaryKey:  primaryKey,
-		Columns:     schemaTableColumns,
-		ForeignKeys: schemaForeignKeys,
-		Indexes:     schemaIndexes,
+	tableSchema := &schemasv1alpha4.MysqlTableSchema{
+		PrimaryKey:     primaryKey,
+		Columns:        schemaTableColumns,
+		ForeignKeys:    schemaForeignKeys,
+		Indexes:        schemaIndexes,
+		DefaultCharset: table.Charset,
+		Collation:      table.Collation,
 	}
 
 	schema := &schemasv1alpha4.TableSchema{}
 
-	if driver == "postgres" {
-		schema.Postgres = tableSchema
-	} else if driver == "mysql" {
-		schema.Mysql = tableSchema
-	}
+	schema.Mysql = tableSchema
 
 	schemaHeroResource := schemasv1alpha4.TableSpec{
 		Database: dbName,
-		Name:     tableName,
+		Name:     table.Name,
 		Requires: []string{},
 		Schema:   schema,
 	}
@@ -173,7 +192,76 @@ func generateTableYAML(driver string, dbName string, tableName string, primaryKe
 kind: Table
 metadata:
   name: %s
-%s`, sanitizeName(tableName), b)
+%s`, sanitizeName(table.Name), b)
+
+	return tableDoc, nil
+
+}
+
+func generatePostgresqlTableYAML(driver string, dbName string, table *types.Table, primaryKey []string, foreignKeys []*types.ForeignKey, indexes []*types.Index, columns []*types.Column) (string, error) {
+	schemaForeignKeys := make([]*schemasv1alpha4.PostgresqlTableForeignKey, 0, 0)
+	for _, foreignKey := range foreignKeys {
+		schemaForeignKey := types.ForeignKeyToPostgresqlSchemaForeignKey(foreignKey)
+		schemaForeignKeys = append(schemaForeignKeys, schemaForeignKey)
+	}
+
+	schemaIndexes := make([]*schemasv1alpha4.PostgresqlTableIndex, 0, 0)
+	for _, index := range indexes {
+		schemaIndex := types.IndexToPostgresqlSchemaIndex(index)
+		schemaIndexes = append(schemaIndexes, schemaIndex)
+	}
+
+	schemaTableColumns := make([]*schemasv1alpha4.PostgresqlTableColumn, 0, 0)
+	for _, column := range columns {
+		schemaTableColumn, err := types.ColumnToPostgresqlSchemaColumn(column)
+		if err != nil {
+			fmt.Printf("%#v\n", err)
+			return "", err
+		}
+
+		schemaTableColumns = append(schemaTableColumns, schemaTableColumn)
+	}
+
+	tableSchema := &schemasv1alpha4.PostgresqlTableSchema{
+		PrimaryKey:  primaryKey,
+		Columns:     schemaTableColumns,
+		ForeignKeys: schemaForeignKeys,
+		Indexes:     schemaIndexes,
+	}
+
+	schema := &schemasv1alpha4.TableSchema{}
+
+	if driver == "postgres" {
+		schema.Postgres = tableSchema
+	} else if driver == "cockroachdb" {
+		schema.CockroachDB = tableSchema
+	}
+
+	schemaHeroResource := schemasv1alpha4.TableSpec{
+		Database: dbName,
+		Name:     table.Name,
+		Requires: []string{},
+		Schema:   schema,
+	}
+
+	specDoc := struct {
+		Spec schemasv1alpha4.TableSpec `yaml:"spec"`
+	}{
+		schemaHeroResource,
+	}
+
+	b, err := yaml.Marshal(&specDoc)
+	if err != nil {
+		fmt.Printf("%#v\n", err)
+		return "", err
+	}
+
+	// TODO consider marshaling this instead of inline
+	tableDoc := fmt.Sprintf(`apiVersion: schemas.schemahero.io/v1alpha4
+kind: Table
+metadata:
+  name: %s
+%s`, sanitizeName(table.Name), b)
 
 	return tableDoc, nil
 

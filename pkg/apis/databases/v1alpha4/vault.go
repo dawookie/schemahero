@@ -18,6 +18,8 @@ package v1alpha4
 
 import (
 	"fmt"
+
+	"github.com/pkg/errors"
 )
 
 // UsingVault determines whether the specific Database connection is
@@ -55,19 +57,23 @@ func (d Database) getDbType() (string, error) {
 	if d.Spec.Connection.CockroachDB != nil {
 		return "cockroachdb", nil
 	}
+	if d.Spec.Connection.Cassandra != nil {
+		return "cassandra", nil
+	}
 	if d.Spec.Connection.Postgres != nil {
 		return "postgres", nil
 	}
 	if d.Spec.Connection.Mysql != nil {
 		return "mysql", nil
-
 	}
 	return "", fmt.Errorf("No database connection configured for database: %s", d.Name)
 }
 
 // GetVaultAnnotations configures the required Vault annotations to
 // work with Vault secret injection, or returns an error if the Database
-// is misconfigured for Vault
+// is misconfigured for Vault.
+// If there is a connection template specified it will be used otherwise
+// a default is provided for the supported database types.
 func (d *Database) GetVaultAnnotations() (map[string]string, error) {
 	if !d.UsingVault() {
 		return nil, nil
@@ -82,31 +88,50 @@ func (d *Database) GetVaultAnnotations() (map[string]string, error) {
 		return nil, nil
 	}
 
-	t, err := d.getDbType()
+	db, err := d.getDbType()
 	if err != nil {
 		return nil, err
 	}
 
-	annotations := make(map[string]string)
+	connTemplate := v.ConnectionTemplate
 
-	switch t {
-	case "postgres", "cockroachdb":
-		t := fmt.Sprintf(`
+	var template string
+	if connTemplate != "" {
+		template = fmt.Sprintf(`
+{{- with secret "database/creds/%s" -}}
+%s{{- end }}`, v.Role, connTemplate)
+
+	} else {
+		switch db {
+		case "postgres", "cockroachdb":
+			if connTemplate == "" {
+				template = fmt.Sprintf(`
 {{- with secret "database/creds/%s" -}}
 postgres://{{ .Data.username }}:{{ .Data.password }}@postgres:5432/%s{{- end }}`, v.Role, d.Name)
+			} else {
+				template = fmt.Sprintf(`
+{{- with secret "database/creds/%s" -}}
+%s`, v.Role, connTemplate)
+			}
 
-		annotations["vault.hashicorp.com/agent-inject-template-schemaherouri"] = t
-	case "mysql":
-		t := fmt.Sprintf(`
+		case "mysql":
+			template = fmt.Sprintf(`
 {{- with secret "database/creds/%s" -}}
 {{ .Data.username }}:{{ .Data.password }}@tcp(mysql:3306)/%s{{- end }}`, v.Role, d.Name)
 
-		annotations["vault.hashicorp.com/agent-inject-template-schemaherouri"] = t
+		case "cassandra":
+			return nil, errors.New("not implemented")
+		default:
+			return nil, fmt.Errorf("unknown database driver: %q", db)
+		}
 	}
 
-	annotations["vault.hashicorp.com/agent-inject"] = "true"
-	annotations["vault.hashicorp.com/agent-inject-secret-schemaherouri"] = fmt.Sprintf("database/creds/%s", v.Role)
-	annotations["vault.hashicorp.com/role"] = v.Role
+	a := map[string]string{
+		"vault.hashicorp.com/agent-inject-template-schemaherouri": template,
+		"vault.hashicorp.com/agent-inject":                        "true",
+		"vault.hashicorp.com/agent-inject-secret-schemaherouri":   fmt.Sprintf("database/creds/%s", v.Role),
+		"vault.hashicorp.com/role":                                v.Role,
+	}
 
-	return annotations, nil
+	return a, nil
 }

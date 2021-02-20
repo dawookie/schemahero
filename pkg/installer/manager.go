@@ -77,7 +77,7 @@ func ensureService(ctx context.Context, clientset *kubernetes.Clientset, namespa
 			return errors.Wrap(err, "failed to get service")
 		}
 
-		_, err := clientset.CoreV1().Secrets(namespace).Create(ctx, secret(namespace), metav1.CreateOptions{})
+		_, err := clientset.CoreV1().Services(namespace).Create(ctx, service(namespace), metav1.CreateOptions{})
 		if err != nil {
 			return errors.Wrap(err, "failed to create service")
 		}
@@ -93,7 +93,7 @@ func service(namespace string) *corev1.Service {
 			Kind:       "Service",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "controller-webhook-server",
+			Name:      "controller-manager-service",
 			Namespace: namespace,
 		},
 		Spec: corev1.ServiceSpec{
@@ -103,7 +103,7 @@ func service(namespace string) *corev1.Service {
 			Ports: []corev1.ServicePort{
 				{
 					Port:       443,
-					TargetPort: intstr.FromInt(9443),
+					TargetPort: intstr.FromInt(9876),
 				},
 			},
 		},
@@ -195,25 +195,7 @@ func manager(isEnterprise bool, namespace string) *appsv1.StatefulSet {
 	if strings.HasPrefix(schemaheroTag, "v") {
 		schemaheroTag = strings.TrimPrefix(schemaheroTag, "v")
 	}
-	schemaHeroImage := fmt.Sprintf("schemahero/schemahero:%s", schemaheroTag)
 	schemaHeroManagerImage := fmt.Sprintf("schemahero/schemahero-manager:%s", schemaheroTag)
-
-	if isEnterprise {
-		env = append(env, corev1.EnvVar{
-			Name:  "SCHEMAHERO_IMAGE_NAME",
-			Value: fmt.Sprintf(`repl{{ LocalImageName "%s"}}`, schemaHeroImage),
-		})
-
-		env = append(env, corev1.EnvVar{
-			Name:  "SCHEMAHERO_IMAGE_PULLSECRET",
-			Value: `repl{{ LocalRegistryImagePullSecret }}`,
-		})
-	} else {
-		env = append(env, corev1.EnvVar{
-			Name:  "SCHEMAHERO_IMAGE_NAME",
-			Value: schemaHeroImage,
-		})
-	}
 
 	return &appsv1.StatefulSet{
 		TypeMeta: metav1.TypeMeta{
@@ -240,6 +222,32 @@ func manager(isEnterprise bool, namespace string) *appsv1.StatefulSet {
 					},
 				},
 				Spec: corev1.PodSpec{
+					Affinity: &corev1.Affinity{
+						NodeAffinity: &corev1.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+								NodeSelectorTerms: []corev1.NodeSelectorTerm{
+									{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      "kubernetes.io/os",
+												Operator: corev1.NodeSelectorOpIn,
+												Values: []string{
+													"linux",
+												},
+											},
+											{
+												Key:      "kubernetes.io/arch",
+												Operator: corev1.NodeSelectorOpIn,
+												Values: []string{
+													"amd64",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
 					TerminationGracePeriodSeconds: &tenSeconds,
 					Volumes: []corev1.Volume{
 						{
@@ -257,7 +265,7 @@ func manager(isEnterprise bool, namespace string) *appsv1.StatefulSet {
 							Image:           schemaHeroManagerImage,
 							ImagePullPolicy: corev1.PullAlways,
 							Name:            "manager",
-							Command:         []string{"/manager", "run"},
+							Command:         []string{"/manager", "run", "--enable-database-controller"},
 							Env:             env,
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{

@@ -5,13 +5,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/schemahero/schemahero/pkg/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
-)
-
-var (
-	kubernetesConfigFlags *genericclioptions.ConfigFlags
 )
 
 func RootCmd() *cobra.Command {
@@ -30,10 +26,9 @@ func RootCmd() *cobra.Command {
 
 	cobra.OnInitialize(initConfig)
 
-	kubernetesConfigFlags = genericclioptions.NewConfigFlags(false)
-	kubernetesConfigFlags.AddFlags(cmd.PersistentFlags())
+	config.AddFlags(cmd.PersistentFlags())
 
-	cmd.Flags().String("log-level", "info", "set the log level")
+	cmd.PersistentFlags().String("log-level", "info", "set the log level")
 
 	cmd.AddCommand(Version())
 	cmd.AddCommand(RunCmd())

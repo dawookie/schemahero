@@ -4,18 +4,19 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v4"
+	"github.com/pkg/errors"
 
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
 	"github.com/schemahero/schemahero/pkg/database/types"
 )
 
-func CreateTableStatement(tableName string, tableSchema *schemasv1alpha4.SQLTableSchema) (string, error) {
+func CreateTableStatements(tableName string, tableSchema *schemasv1alpha4.PostgresqlTableSchema) ([]string, error) {
 	columns := []string{}
 	for _, desiredColumn := range tableSchema.Columns {
-		columnFields, err := postgresColumnAsInsert(desiredColumn)
+		columnFields, err := columnAsInsert(desiredColumn)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		columns = append(columns, columnFields)
 	}
@@ -23,7 +24,7 @@ func CreateTableStatement(tableName string, tableSchema *schemasv1alpha4.SQLTabl
 	if len(tableSchema.PrimaryKey) > 0 {
 		primaryKeyColumns := []string{}
 		for _, primaryKeyColumn := range tableSchema.PrimaryKey {
-			primaryKeyColumns = append(primaryKeyColumns, pq.QuoteIdentifier(primaryKeyColumn))
+			primaryKeyColumns = append(primaryKeyColumns, pgx.Identifier{primaryKeyColumn}.Sanitize())
 		}
 
 		columns = append(columns, fmt.Sprintf("primary key (%s)", strings.Join(primaryKeyColumns, ", ")))
@@ -34,9 +35,9 @@ func CreateTableStatement(tableName string, tableSchema *schemasv1alpha4.SQLTabl
 			if index.IsUnique {
 				uniqueColumns := []string{}
 				for _, indexColumn := range index.Columns {
-					uniqueColumns = append(uniqueColumns, pq.QuoteIdentifier(indexColumn))
+					uniqueColumns = append(uniqueColumns, pgx.Identifier{indexColumn}.Sanitize())
 				}
-				columns = append(columns, fmt.Sprintf("constraint %q unique (%s)", types.GenerateIndexName(tableName, index), strings.Join(uniqueColumns, ", ")))
+				columns = append(columns, fmt.Sprintf("constraint %q unique (%s)", types.GeneratePostgresqlIndexName(tableName, index), strings.Join(uniqueColumns, ", ")))
 			} else {
 				// non unique indexes are not supported in fixtures
 			}
@@ -49,7 +50,18 @@ func CreateTableStatement(tableName string, tableSchema *schemasv1alpha4.SQLTabl
 		}
 	}
 
-	query := fmt.Sprintf(`create table %s (%s)`, pq.QuoteIdentifier(tableName), strings.Join(columns, ", "))
+	queries := []string{
+		fmt.Sprintf(`create table %s (%s)`, pgx.Identifier{tableName}.Sanitize(), strings.Join(columns, ", ")),
+	}
 
-	return query, nil
+	// Add any triggers that are defined
+	for _, trigger := range tableSchema.Triggers {
+		statement, err := triggerCreateStatement(trigger, tableName)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create trigger statement")
+		}
+
+		queries = append(queries, statement)
+	}
+	return queries, nil
 }

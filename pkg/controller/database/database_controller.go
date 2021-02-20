@@ -32,53 +32,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
-
-var tenSeconds = int64(10)
-var defaultMode = int32(420)
-
-// Add creates a new Database Controller and adds it to the Manager with default RBAC. The Manager will set fields on the Controller
-// and Start it when the Manager is Started.
-func Add(mgr manager.Manager, managerImage string, managerTag string) error {
-	return add(mgr, newReconciler(mgr, managerImage, managerTag))
-}
-
-// newReconciler returns a new reconcile.Reconciler
-func newReconciler(mgr manager.Manager, managerImage string, managerTag string) reconcile.Reconciler {
-	return &ReconcileDatabase{
-		Client:       mgr.GetClient(),
-		scheme:       mgr.GetScheme(),
-		managerImage: managerImage,
-		managerTag:   managerTag,
-	}
-}
-
-// add adds a new Controller to mgr with r as the reconcile.Reconciler
-func add(mgr manager.Manager, r reconcile.Reconciler) error {
-	logger.Debug("adding database controller to manager")
-
-	// Create a new controller
-	c, err := controller.New("database-controller", mgr, controller.Options{Reconciler: r})
-	if err != nil {
-		return err
-	}
-
-	// Watch for changes to Database kinds
-	err = c.Watch(&source.Kind{
-		Type: &databasesv1alpha4.Database{},
-	}, &handler.EnqueueRequestForObject{})
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
 
 var _ reconcile.Reconciler = &ReconcileDatabase{}
 
@@ -97,13 +53,11 @@ type ReconcileDatabase struct {
 // +kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=databases.schemahero.io,resources=databases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=databases.schemahero.io,resources=databases/status,verbs=get;update;patch
-func (r *ReconcileDatabase) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+func (r *ReconcileDatabase) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	databaseInstance, err := r.getInstance(request)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-
-	ctx := context.Background()
 
 	// A "database" object is realized in the cluster as a deployment object,
 	// in the namespace specified in the custom resource,
@@ -130,6 +84,7 @@ func (r *ReconcileDatabase) Reconcile(request reconcile.Request) (reconcile.Resu
 	}
 
 	// TODO detect k8s version and use appsv1 or appsv1beta
+
 	existingStatefulset := appsv1.StatefulSet{}
 	err = r.Get(ctx, types.NamespacedName{
 		Namespace: databaseInstance.Namespace,
@@ -137,6 +92,9 @@ func (r *ReconcileDatabase) Reconcile(request reconcile.Request) (reconcile.Resu
 	}, &existingStatefulset)
 	if kuberneteserrors.IsNotFound(err) {
 		// create
+
+		serviceAccountName := fmt.Sprintf("schemahero-%s", databaseInstance.Name)
+
 		statefulSet := appsv1.StatefulSet{
 			TypeMeta: metav1.TypeMeta{
 				APIVersion: "apps/v1",
@@ -166,8 +124,34 @@ func (r *ReconcileDatabase) Reconcile(request reconcile.Request) (reconcile.Resu
 						Annotations: vaultAnnotations,
 					},
 					Spec: corev1.PodSpec{
+						Affinity: &corev1.Affinity{
+							NodeAffinity: &corev1.NodeAffinity{
+								RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{
+											MatchExpressions: []corev1.NodeSelectorRequirement{
+												{
+													Key:      "kubernetes.io/os",
+													Operator: corev1.NodeSelectorOpIn,
+													Values: []string{
+														"linux",
+													},
+												},
+												{
+													Key:      "kubernetes.io/arch",
+													Operator: corev1.NodeSelectorOpIn,
+													Values: []string{
+														"amd64",
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
 						TerminationGracePeriodSeconds: &tenSeconds,
-						ServiceAccountName:            "schemahero",
+						ServiceAccountName:            serviceAccountName,
 						Containers: []corev1.Container{
 							{
 								Image:           schemaHeroManagerImage,
@@ -211,7 +195,7 @@ func (r *ReconcileDatabase) Reconcile(request reconcile.Request) (reconcile.Resu
 	} else {
 		// update with the new database details
 
-		logger.Error(errors.New("updating table reconciler is not implemeted"))
+		logger.Error(errors.New("updating table reconciler is not implemented"))
 	}
 
 	return reconcile.Result{}, nil

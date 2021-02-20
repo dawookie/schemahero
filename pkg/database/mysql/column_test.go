@@ -14,20 +14,58 @@ func Test_mysqlColumnAsInsert(t *testing.T) {
 	default11 := "11"
 	tests := []struct {
 		name              string
-		column            *schemasv1alpha4.SQLTableColumn
+		column            *schemasv1alpha4.MysqlTableColumn
 		expectedStatement string
 	}{
 		{
 			name: "simple",
-			column: &schemasv1alpha4.SQLTableColumn{
+			column: &schemasv1alpha4.MysqlTableColumn{
 				Name: "c",
 				Type: "integer",
-				Constraints: &schemasv1alpha4.SQLTableColumnConstraints{
+				Constraints: &schemasv1alpha4.MysqlTableColumnConstraints{
 					NotNull: &trueValue,
 				},
 				Default: &default11,
 			},
 			expectedStatement: "`c` int (11) not null default '11'",
+		},
+		{
+			name: "auto_increment",
+			column: &schemasv1alpha4.MysqlTableColumn{
+				Name: "c",
+				Type: "integer",
+				Constraints: &schemasv1alpha4.MysqlTableColumnConstraints{
+					NotNull: &trueValue,
+				},
+				Attributes: &schemasv1alpha4.MysqlTableColumnAttributes{
+					AutoIncrement: &trueValue,
+				},
+			},
+			expectedStatement: "`c` int (11) not null auto_increment",
+		},
+		{
+			name: "charset and collation",
+			column: &schemasv1alpha4.MysqlTableColumn{
+				Name:      "c",
+				Type:      "varchar(255)",
+				Charset:   "latin1",
+				Collation: "latin1_danish_ci",
+			},
+			expectedStatement: "`c` varchar (255) character set latin1 collate latin1_danish_ci",
+		},
+		{
+			name: "charset and collation not null default",
+			column: &schemasv1alpha4.MysqlTableColumn{
+				Name: "c",
+				Type: "varchar(255)",
+				Constraints: &schemasv1alpha4.MysqlTableColumnConstraints{
+					NotNull: &trueValue,
+				},
+				Default:   &default11,
+				Charset:   "latin1",
+				Collation: "latin1_danish_ci",
+			},
+			expectedStatement: "`c` varchar (255) character set latin1 collate latin1_danish_ci not null default '11'",
 		},
 	}
 
@@ -46,13 +84,13 @@ func Test_InsertColumnStatement(t *testing.T) {
 	tests := []struct {
 		name              string
 		tableName         string
-		desiredColumn     *schemasv1alpha4.SQLTableColumn
+		desiredColumn     *schemasv1alpha4.MysqlTableColumn
 		expectedStatement string
 	}{
 		{
 			name:      "add column",
 			tableName: "t",
-			desiredColumn: &schemasv1alpha4.SQLTableColumn{
+			desiredColumn: &schemasv1alpha4.MysqlTableColumn{
 				Name: "a",
 				Type: "integer",
 			},
@@ -61,10 +99,10 @@ func Test_InsertColumnStatement(t *testing.T) {
 		{
 			name:      "add not null column",
 			tableName: "t",
-			desiredColumn: &schemasv1alpha4.SQLTableColumn{
+			desiredColumn: &schemasv1alpha4.MysqlTableColumn{
 				Name: "a",
 				Type: "integer",
-				Constraints: &schemasv1alpha4.SQLTableColumnConstraints{
+				Constraints: &schemasv1alpha4.MysqlTableColumnConstraints{
 					NotNull: &trueValue,
 				},
 			},
@@ -73,14 +111,26 @@ func Test_InsertColumnStatement(t *testing.T) {
 		{
 			name:      "add null column",
 			tableName: "t",
-			desiredColumn: &schemasv1alpha4.SQLTableColumn{
+			desiredColumn: &schemasv1alpha4.MysqlTableColumn{
 				Name: "a",
 				Type: "integer",
-				Constraints: &schemasv1alpha4.SQLTableColumnConstraints{
+				Constraints: &schemasv1alpha4.MysqlTableColumnConstraints{
 					NotNull: &falseValue,
 				},
 			},
 			expectedStatement: "alter table `t` add column `a` int (11) null",
+		},
+		{
+			name:      "add auto_increment column",
+			tableName: "t",
+			desiredColumn: &schemasv1alpha4.MysqlTableColumn{
+				Name: "a",
+				Type: "integer",
+				Attributes: &schemasv1alpha4.MysqlTableColumnAttributes{
+					AutoIncrement: &trueValue,
+				},
+			},
+			expectedStatement: "alter table `t` add column `a` int (11) auto_increment",
 		},
 	}
 
@@ -98,12 +148,12 @@ func Test_InsertColumnStatement(t *testing.T) {
 func Test_schemaColumnToMysqlColumn(t *testing.T) {
 	tests := []struct {
 		name           string
-		schemaColumn   *schemasv1alpha4.SQLTableColumn
+		schemaColumn   *schemasv1alpha4.MysqlTableColumn
 		expectedColumn *types.Column
 	}{
 		{
 			name: "varchar (10)",
-			schemaColumn: &schemasv1alpha4.SQLTableColumn{
+			schemaColumn: &schemasv1alpha4.MysqlTableColumn{
 				Name: "vc",
 				Type: "varchar (10)",
 			},
@@ -115,7 +165,7 @@ func Test_schemaColumnToMysqlColumn(t *testing.T) {
 		},
 		{
 			name: "bool",
-			schemaColumn: &schemasv1alpha4.SQLTableColumn{
+			schemaColumn: &schemasv1alpha4.MysqlTableColumn{
 				Name: "b",
 				Type: "bool",
 			},
@@ -123,6 +173,23 @@ func Test_schemaColumnToMysqlColumn(t *testing.T) {
 				Name:          "b",
 				DataType:      "tinyint (1)",
 				ColumnDefault: nil,
+			},
+		},
+		{
+			name: "auto_increment",
+			schemaColumn: &schemasv1alpha4.MysqlTableColumn{
+				Name: "c",
+				Type: "integer (11)",
+				Attributes: &schemasv1alpha4.MysqlTableColumnAttributes{
+					AutoIncrement: &trueValue,
+				},
+			},
+			expectedColumn: &types.Column{
+				Name:     "c",
+				DataType: "int (11)",
+				Attributes: &types.ColumnAttributes{
+					AutoIncrement: &trueValue,
+				},
 			},
 		},
 	}

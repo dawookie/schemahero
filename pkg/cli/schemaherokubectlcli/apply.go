@@ -13,9 +13,10 @@ import (
 
 func ApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "apply",
-		Short: "apply a spec to a database",
-		Long:  `...`,
+		Use:          "apply",
+		Short:        "apply a spec to a database",
+		Long:         `...`,
+		SilenceUsage: true,
 		PreRun: func(cmd *cobra.Command, args []string) {
 			viper.BindPFlags(cmd.Flags())
 		},
@@ -26,8 +27,9 @@ func ApplyCmd() *cobra.Command {
 			driver := v.GetString("driver")
 			ddl := v.GetString("ddl")
 			uri := v.GetString("uri")
+			host := v.GetStringSlice("host")
 
-			if driver == "" || ddl == "" || uri == "" {
+			if driver == "" || ddl == "" || uri == "" || len(host) == 0 {
 				missing := []string{}
 				if driver == "" {
 					missing = append(missing, "driver")
@@ -35,11 +37,15 @@ func ApplyCmd() *cobra.Command {
 				if ddl == "" {
 					missing = append(missing, "ddl")
 				}
-				if uri == "" {
-					missing = append(missing, "uri")
+
+				// one of uri or host/port must be specified
+				if uri == "" && len(host) == 0 {
+					missing = append(missing, "uri or host(s)")
 				}
 
-				return fmt.Errorf("missing required params: %v", missing)
+				if len(missing) > 0 {
+					return fmt.Errorf("missing required params: %v", missing)
+				}
 			}
 
 			fi, err := os.Stat(v.GetString("ddl"))
@@ -52,11 +58,18 @@ func ApplyCmd() *cobra.Command {
 				OutputDir: v.GetString("output-dir"),
 				Driver:    v.GetString("driver"),
 				URI:       v.GetString("uri"),
+				Hosts:     v.GetStringSlice("host"),
+				Username:  v.GetString("username"),
+				Password:  v.GetString("password"),
+				Keyspace:  v.GetString("keyspace"),
 			}
 
 			if fi.Mode().IsDir() {
 				commands := []string{}
 				err := filepath.Walk(v.GetString("ddl"), func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						return err
+					}
 					if info.IsDir() {
 						return nil
 					}
@@ -112,7 +125,14 @@ func ApplyCmd() *cobra.Command {
 	}
 
 	cmd.Flags().String("driver", "", "name of the database driver to use")
+
 	cmd.Flags().String("uri", "", "connection string uri to use")
+
+	cmd.Flags().String("username", "", "username to use when connecting")
+	cmd.Flags().String("password", "", "password to use when connecting")
+	cmd.Flags().StringSlice("host", []string{}, "hostname to use when connecting")
+	cmd.Flags().String("keyspace", "", "the keyspace to use for databases that support keyspaces")
+
 	cmd.Flags().String("ddl", "", "filename or directory name containing the rendered DDL commands to execute")
 
 	return cmd

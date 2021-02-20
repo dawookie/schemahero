@@ -46,11 +46,87 @@ spec:
                 type: array
               schema:
                 properties:
+                  cassandra:
+                    properties:
+                      clusteringOrder:
+                        properties:
+                          column:
+                            type: string
+                          isDescending:
+                            type: boolean
+                        required:
+                        - column
+                        type: object
+                      columns:
+                        items:
+                          properties:
+                            isStatic:
+                              type: boolean
+                            name:
+                              type: string
+                            type:
+                              type: string
+                          required:
+                          - name
+                          - type
+                          type: object
+                        type: array
+                      isDeleted:
+                        type: boolean
+                      primaryKey:
+                        items:
+                          items:
+                            type: string
+                          type: array
+                        type: array
+                      properties:
+                        properties:
+                          bloomFilterFPChance:
+                            type: string
+                          caching:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          comment:
+                            type: string
+                          compaction:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          compression:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          crcCheckChance:
+                            type: string
+                          dcLocalReadRepairChance:
+                            type: string
+                          defaultTTL:
+                            type: integer
+                          gcGraceSeconds:
+                            type: integer
+                          maxIndexInterval:
+                            type: integer
+                          memtableFlushPeriodMs:
+                            type: integer
+                          minIndexInterval:
+                            type: integer
+                          readRepairChance:
+                            type: string
+                          speculativeRetry:
+                            type: string
+                        type: object
+                    type: object
                   cockroachdb:
                     properties:
                       columns:
                         items:
                           properties:
+                            attributes:
+                              properties:
+                                autoIncrement:
+                                  type: boolean
+                              type: object
                             constraints:
                               properties:
                                 notNull:
@@ -114,6 +190,34 @@ spec:
                         type: array
                       isDeleted:
                         type: boolean
+                      json:triggers:
+                        items:
+                          properties:
+                            arguments:
+                              items:
+                                type: string
+                              type: array
+                            condition:
+                              type: string
+                            constraintTrigger:
+                              type: boolean
+                            events:
+                              items:
+                                type: string
+                              type: array
+                            executeProcedure:
+                              type: string
+                            forEachRun:
+                              type: boolean
+                            forEachStatement:
+                              type: boolean
+                            name:
+                              type: string
+                          required:
+                          - events
+                          - executeProcedure
+                          type: object
+                        type: array
                       primaryKey:
                         items:
                           type: string
@@ -121,9 +225,20 @@ spec:
                     type: object
                   mysql:
                     properties:
+                      collation:
+                        type: string
                       columns:
                         items:
                           properties:
+                            attributes:
+                              properties:
+                                autoIncrement:
+                                  type: boolean
+                              type: object
+                            charset:
+                              type: string
+                            collation:
+                              type: string
                             constraints:
                               properties:
                                 notNull:
@@ -140,6 +255,8 @@ spec:
                           - type
                           type: object
                         type: array
+                      defaultCharset:
+                        type: string
                       foreignKeys:
                         items:
                           properties:
@@ -197,6 +314,117 @@ spec:
                       columns:
                         items:
                           properties:
+                            attributes:
+                              properties:
+                                autoIncrement:
+                                  type: boolean
+                              type: object
+                            constraints:
+                              properties:
+                                notNull:
+                                  type: boolean
+                              type: object
+                            default:
+                              type: string
+                            name:
+                              type: string
+                            type:
+                              type: string
+                          required:
+                          - name
+                          - type
+                          type: object
+                        type: array
+                      foreignKeys:
+                        items:
+                          properties:
+                            columns:
+                              items:
+                                type: string
+                              type: array
+                            name:
+                              type: string
+                            onDelete:
+                              type: string
+                            references:
+                              properties:
+                                columns:
+                                  items:
+                                    type: string
+                                  type: array
+                                table:
+                                  type: string
+                              required:
+                              - columns
+                              - table
+                              type: object
+                          required:
+                          - columns
+                          - references
+                          type: object
+                        type: array
+                      indexes:
+                        items:
+                          properties:
+                            columns:
+                              items:
+                                type: string
+                              type: array
+                            isUnique:
+                              type: boolean
+                            name:
+                              type: string
+                            type:
+                              type: string
+                          required:
+                          - columns
+                          type: object
+                        type: array
+                      isDeleted:
+                        type: boolean
+                      json:triggers:
+                        items:
+                          properties:
+                            arguments:
+                              items:
+                                type: string
+                              type: array
+                            condition:
+                              type: string
+                            constraintTrigger:
+                              type: boolean
+                            events:
+                              items:
+                                type: string
+                              type: array
+                            executeProcedure:
+                              type: string
+                            forEachRun:
+                              type: boolean
+                            forEachStatement:
+                              type: boolean
+                            name:
+                              type: string
+                          required:
+                          - events
+                          - executeProcedure
+                          type: object
+                        type: array
+                      primaryKey:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  sqlite:
+                    properties:
+                      columns:
+                        items:
+                          properties:
+                            attributes:
+                              properties:
+                                autoIncrement:
+                                  type: boolean
+                              type: object
                             constraints:
                               properties:
                                 notNull:

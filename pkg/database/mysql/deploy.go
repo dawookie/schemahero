@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/pkg/errors"
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
 	"github.com/schemahero/schemahero/pkg/database/types"
 )
 
-func PlanMysqlTable(uri string, tableName string, mysqlTableSchema *schemasv1alpha4.SQLTableSchema) ([]string, error) {
+func PlanMysqlTable(uri string, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
 	m, err := Connect(uri)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to connect to mysql")
@@ -35,15 +36,22 @@ func PlanMysqlTable(uri string, tableName string, mysqlTableSchema *schemasv1alp
 
 	if tableExists == 0 {
 		// shortcut to just create it
-		query, err := CreateTableStatement(tableName, mysqlTableSchema)
+		queries, err := CreateTableStatements(tableName, mysqlTableSchema)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create table statement")
 		}
 
-		return []string{query}, nil
+		return queries, nil
 	}
 
 	statements := []string{}
+
+	// first, if the table charset or collation changed, add
+	charsetAndCollationStatements, err := buildTableCharsetAndCollationStatements(m, tableName, mysqlTableSchema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build table charset and collation statements")
+	}
+	statements = append(statements, charsetAndCollationStatements...)
 
 	// table needs to be altered?
 	columnStatements, err := buildColumnStatements(m, tableName, mysqlTableSchema)
@@ -105,9 +113,95 @@ func executeStatements(m *MysqlConnection, statements []string) error {
 	return nil
 }
 
-func buildColumnStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.SQLTableSchema) ([]string, error) {
+func buildTableCharsetAndCollationStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
+	query := `select 
+t.TABLE_COLLATION,
+c.character_set_name FROM information_schema.TABLES t,
+information_schema.COLLATION_CHARACTER_SET_APPLICABILITY c
+WHERE c.collation_name = t.table_collation
+AND t.table_schema = ?
+AND t.table_name = ?;`
+	row := m.db.QueryRow(query, m.databaseName, tableName)
+
+	var existingTableCollation, existingTableCharset string
+	if err := row.Scan(&existingTableCollation, &existingTableCharset); err != nil {
+		return nil, errors.Wrap(err, "failed to read existing table charset and collate")
+	}
+
+	// get the default for the database also
+	query = `SELECT default_character_set_name, default_collation_name FROM information_schema.SCHEMATA 
+WHERE schema_name = ?`
+	row = m.db.QueryRow(query, m.databaseName)
+
+	var databaseCollation, databaseCharset string
+	if err := row.Scan(&databaseCharset, &databaseCollation); err != nil {
+		return nil, errors.Wrap(err, "failed to read existing database charset and collate")
+	}
+
+	charsetMatches := false
+	collationMatches := false
+
+	if mysqlTableSchema.DefaultCharset == existingTableCharset {
+		charsetMatches = true
+	} else if mysqlTableSchema.DefaultCharset == "" && existingTableCharset == databaseCharset {
+		charsetMatches = true
+	}
+
+	if mysqlTableSchema.Collation == existingTableCollation {
+		collationMatches = true
+	}
+	if mysqlTableSchema.Collation == existingTableCollation {
+		collationMatches = true
+	}
+
+	if charsetMatches && collationMatches {
+		return []string{}, nil
+	}
+
+	if mysqlTableSchema.Collation == "" && mysqlTableSchema.DefaultCharset == "" {
+		if existingTableCollation == databaseCollation {
+			if existingTableCharset == databaseCharset {
+				return []string{}, nil
+			}
+		}
+	}
+
+	// fill in defaults where needed
+	if mysqlTableSchema.Collation == "" {
+		if mysqlTableSchema.DefaultCharset == "" {
+			mysqlTableSchema.Collation = databaseCollation
+			mysqlTableSchema.DefaultCharset = databaseCharset
+		} else {
+			// get the default collation for the charset
+			query = `select DEFAULT_COLLATE_NAME from information_schema.character_sets where CHARACTER_SET_NAME = ?`
+			row = m.db.QueryRow(query, mysqlTableSchema.DefaultCharset)
+			var defaultCollationForCharset string
+			if err := row.Scan(&defaultCollationForCharset); err != nil {
+				return nil, errors.Wrap(err, "failed to read default collation for charset")
+			}
+			mysqlTableSchema.Collation = defaultCollationForCharset
+		}
+	}
+	if mysqlTableSchema.DefaultCharset == "" {
+		// here the collation must have been set, but not the charset
+		// get the charset associated with the collation
+		query = `select CHARACTER_SET_NAME from information_schema.collations where COLLATION_NAME = ?`
+		row = m.db.QueryRow(query, mysqlTableSchema.Collation)
+		var collationCharset string
+		if err := row.Scan(&collationCharset); err != nil {
+			return nil, errors.Wrap(err, "failed to read charset for collation")
+		}
+		mysqlTableSchema.DefaultCharset = collationCharset
+	}
+
+	return []string{
+		fmt.Sprintf("alter table %s convert to character set %s collate %s", tableName, mysqlTableSchema.DefaultCharset, mysqlTableSchema.Collation),
+	}, nil
+}
+
+func buildColumnStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
 	query := `select
-COLUMN_NAME, COLUMN_DEFAULT, IS_NULLABLE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+COLUMN_NAME, COLUMN_DEFAULT, IS_NULLABLE, EXTRA, COLUMN_TYPE, CHARACTER_MAXIMUM_LENGTH
 from information_schema.COLUMNS
 where TABLE_NAME = ?`
 	rows, err := m.db.Query(query, tableName)
@@ -117,16 +211,20 @@ where TABLE_NAME = ?`
 	alterAndDropStatements := []string{}
 	foundColumnNames := []string{}
 	for rows.Next() {
-		var columnName, dataType, isNullable string
+		var columnName, dataType, isNullable, extra string
 		var columnDefault sql.NullString
 		var charMaxLength sql.NullInt64
+		var charset, collation string
 
-		if err := rows.Scan(&columnName, &columnDefault, &isNullable, &dataType, &charMaxLength); err != nil {
+		if err := rows.Scan(&columnName, &columnDefault, &isNullable, &extra, &dataType, &charMaxLength); err != nil {
 			return nil, errors.Wrap(err, "failed to scan")
 		}
 
-		if charMaxLength.Valid {
-			dataType = fmt.Sprintf("%s (%d)", dataType, charMaxLength.Int64)
+		ignoreMaxLength := false
+		if dataType == "text" || dataType == "tinytext" || dataType == "mediumtext" || dataType == "longtext" ||
+			dataType == "blob" || dataType == "tinyblob" || dataType == "mediumblob" || dataType == "longblob" {
+
+			ignoreMaxLength = true
 		}
 
 		if isParameterizedColumnType(dataType) {
@@ -134,6 +232,8 @@ where TABLE_NAME = ?`
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to parse parameterized column type")
 			}
+		} else if charMaxLength.Valid && !ignoreMaxLength {
+			dataType = fmt.Sprintf("%s (%d)", dataType, charMaxLength.Int64)
 		}
 
 		foundColumnNames = append(foundColumnNames, columnName)
@@ -142,12 +242,21 @@ where TABLE_NAME = ?`
 			Name:        columnName,
 			DataType:    dataType,
 			Constraints: &types.ColumnConstraints{},
+			Attributes:  &types.ColumnAttributes{},
+			Charset:     charset,
+			Collation:   collation,
 		}
 
 		if isNullable == "NO" {
 			existingColumn.Constraints.NotNull = &trueValue
 		} else {
 			existingColumn.Constraints.NotNull = &falseValue
+		}
+
+		if strings.Contains(extra, "auto_increment") {
+			existingColumn.Attributes.AutoIncrement = &trueValue
+		} else {
+			existingColumn.Attributes.AutoIncrement = &falseValue
 		}
 
 		if columnDefault.Valid {
@@ -183,7 +292,7 @@ where TABLE_NAME = ?`
 	return alterAndDropStatements, nil
 }
 
-func buildPrimaryKeyStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.SQLTableSchema) ([]string, error) {
+func buildPrimaryKeyStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
 	currentPrimaryKey, err := m.GetTablePrimaryKey(tableName)
 	if err != nil {
 		return nil, err
@@ -218,7 +327,7 @@ func buildPrimaryKeyStatements(m *MysqlConnection, tableName string, mysqlTableS
 	return statements, nil
 }
 
-func buildForeignKeyStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.SQLTableSchema) ([]string, error) {
+func buildForeignKeyStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
 	foreignKeyStatements := []string{}
 	currentForeignKeys, err := m.ListTableForeignKeys(m.databaseName, tableName)
 	if err != nil {
@@ -229,7 +338,7 @@ func buildForeignKeyStatements(m *MysqlConnection, tableName string, mysqlTableS
 		var statement string
 		var matchedForeignKey *types.ForeignKey
 		for _, currentForeignKey := range currentForeignKeys {
-			if currentForeignKey.Equals(types.SchemaForeignKeyToForeignKey(foreignKey)) {
+			if currentForeignKey.Equals(types.MysqlSchemaForeignKeyToForeignKey(foreignKey)) {
 				goto Next
 			}
 
@@ -252,7 +361,7 @@ func buildForeignKeyStatements(m *MysqlConnection, tableName string, mysqlTableS
 	for _, currentForeignKey := range currentForeignKeys {
 		var statement string
 		for _, foreignKey := range mysqlTableSchema.ForeignKeys {
-			if currentForeignKey.Equals(types.SchemaForeignKeyToForeignKey(foreignKey)) {
+			if currentForeignKey.Equals(types.MysqlSchemaForeignKeyToForeignKey(foreignKey)) {
 				goto NextCurrentFK
 			}
 		}
@@ -266,48 +375,37 @@ func buildForeignKeyStatements(m *MysqlConnection, tableName string, mysqlTableS
 	return foreignKeyStatements, nil
 }
 
-func buildIndexStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.SQLTableSchema) ([]string, error) {
+func buildIndexStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
 	indexStatements := []string{}
 	currentIndexes, err := m.ListTableIndexes(m.databaseName, tableName)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, index := range mysqlTableSchema.Indexes {
-		var statement string
-		var matchedIndex *types.Index
-		for _, currentIndex := range currentIndexes {
-			if currentIndex.Equals(types.SchemaIndexToIndex(index)) {
-				goto Next
+	for _, currentIndex := range currentIndexes {
+		isMatch := false
+		for _, desiredIndex := range mysqlTableSchema.Indexes {
+			if currentIndex.Equals(types.MysqlSchemaIndexToIndex(desiredIndex)) {
+				isMatch = true
 			}
-
-			matchedIndex = currentIndex
 		}
 
-		// drop and readd?  mysql supports renaming indexes
-		if matchedIndex != nil {
-			statement = RemoveIndexStatement(tableName, matchedIndex)
-			indexStatements = append(indexStatements, statement)
+		if !isMatch {
+			indexStatements = append(indexStatements, RemoveIndexStatement(tableName, currentIndex))
 		}
-
-		statement = AddIndexStatement(tableName, index)
-		indexStatements = append(indexStatements, statement)
-
-	Next:
 	}
 
-	for _, currentIndex := range currentIndexes {
-		var statement string
-		for _, index := range mysqlTableSchema.Indexes {
-			if currentIndex.Equals(types.SchemaIndexToIndex(index)) {
-				goto NextCurrentIdx
+	for _, desiredIndex := range mysqlTableSchema.Indexes {
+		isMatch := false
+		for _, currentIndex := range currentIndexes {
+			if currentIndex.Equals(types.MysqlSchemaIndexToIndex(desiredIndex)) {
+				isMatch = true
 			}
 		}
 
-		statement = RemoveIndexStatement(tableName, currentIndex)
-		indexStatements = append(indexStatements, statement)
-
-	NextCurrentIdx:
+		if !isMatch {
+			indexStatements = append(indexStatements, AddIndexStatement(tableName, desiredIndex))
+		}
 	}
 
 	return indexStatements, nil

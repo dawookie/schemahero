@@ -19,6 +19,10 @@ mysql:
 cockroach:
 	make -C tests/cockroach run
 
+.PHONY: sqlite
+sqlite:
+	make -C tests/sqlite run
+	
 .PHONY: build
 build: docker-build
 	docker push $(IMAGE)

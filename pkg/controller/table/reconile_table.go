@@ -9,13 +9,13 @@ import (
 	databasesv1alpha4 "github.com/schemahero/schemahero/pkg/apis/databases/v1alpha4"
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
 	databasesclientv1alpha4 "github.com/schemahero/schemahero/pkg/client/schemaheroclientset/typed/databases/v1alpha4"
+	"github.com/schemahero/schemahero/pkg/config"
 	"github.com/schemahero/schemahero/pkg/database"
 	"github.com/schemahero/schemahero/pkg/logger"
 	"go.uber.org/zap"
 	kuberneteserrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -114,7 +114,7 @@ func (r *ReconcileTable) getDatabaseInstance(ctx context.Context, namespace stri
 		zap.String("namespace", namespace),
 		zap.String("name", name))
 
-	cfg, err := config.GetConfig()
+	cfg, err := config.GetRESTConfig()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get config")
 	}
@@ -169,6 +169,10 @@ func (r *ReconcileTable) plan(ctx context.Context, databaseInstance *databasesv1
 	statements, err := db.PlanSyncTableSpec(&tableInstance.Spec)
 	if err != nil {
 		return reconcile.Result{}, errors.Wrap(err, "failed to plan sync")
+	}
+
+	if len(statements) == 0 {
+		return reconcile.Result{}, nil
 	}
 
 	tableSHA, err := tableInstance.GetSHA()

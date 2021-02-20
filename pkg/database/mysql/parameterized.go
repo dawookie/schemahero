@@ -9,11 +9,16 @@ import (
 
 var unparameterizedColumnTypes = []string{
 	"date",
+	"datetime",
+	"timestamp",
 	"tinyblob",
+	"tinytext",
 	"mediumblob",
 	"mediumtext",
 	"longblob",
 	"longtext",
+	"blob",
+	"text",
 }
 
 func isParameterizedColumnType(requestedType string) bool {
@@ -48,9 +53,14 @@ func maybeParseParameterizedColumnType(requestedType string) (string, error) {
 	} else if strings.HasPrefix(requestedType, "char") {
 		columnType = "char"
 
+		if strings.Contains(requestedType, "character") {
+			requestedType = strings.Replace(requestedType, "character", "char", -1)
+		}
+
 		r := regexp.MustCompile(`char\s*\((?P<max>\d*)\)`)
 
 		matchGroups := r.FindStringSubmatch(requestedType)
+
 		if len(matchGroups) == 0 {
 			columnType = "char (11)"
 		} else {

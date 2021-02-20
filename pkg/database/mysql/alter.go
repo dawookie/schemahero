@@ -5,7 +5,7 @@ import (
 	"github.com/schemahero/schemahero/pkg/database/types"
 )
 
-func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumns []*schemasv1alpha4.SQLTableColumn, existingColumn *types.Column) ([]string, error) {
+func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumns []*schemasv1alpha4.MysqlTableColumn, existingColumn *types.Column) ([]string, error) {
 	// this could be an alter or a drop column command
 	for _, desiredColumn := range desiredColumns {
 		if desiredColumn.Name == existingColumn.Name {
@@ -50,6 +50,14 @@ func columnsMatch(col1 *types.Column, col2 *types.Column) bool {
 		return false
 	}
 
+	if col1.Charset != col2.Charset {
+		return false
+	}
+
+	if col1.Collation != col2.Collation {
+		return false
+	}
+
 	if col1.ColumnDefault != nil && col2.ColumnDefault == nil {
 		return false
 	} else if col1.ColumnDefault == nil && col2.ColumnDefault != nil {
@@ -66,7 +74,23 @@ func columnsMatch(col1 *types.Column, col2 *types.Column) bool {
 		col2Constraints = &types.ColumnConstraints{}
 	}
 
-	return types.NotNullConstraintEquals(col1Constraints.NotNull, col2Constraints.NotNull)
+	if !types.BoolsEqual(col1Constraints.NotNull, col2Constraints.NotNull) {
+		return false
+	}
+
+	col1Attributes, col2Attributes := col1.Attributes, col2.Attributes
+	if col1Attributes == nil {
+		col1Attributes = &types.ColumnAttributes{}
+	}
+	if col2Attributes == nil {
+		col2Attributes = &types.ColumnAttributes{}
+	}
+
+	if !types.BoolsEqual(col1Attributes.AutoIncrement, col2Attributes.AutoIncrement) {
+		return false
+	}
+
+	return true
 }
 
 func ensureColumnConstraintsNotNullTrue(column *types.Column) {
