@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Replicated, Inc.
+Copyright 2019 The SchemaHero Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,10 +19,11 @@ package v1alpha4
 type CockroachDBConnection struct {
 	URI ValueOrValueFrom `json:"uri,omitempty"`
 
-	Host     ValueOrValueFrom `json:"host,omitempty"`
-	Port     ValueOrValueFrom `json:"port,omitempty"`
-	User     ValueOrValueFrom `json:"user,omitempty"`
-	Password ValueOrValueFrom `json:"password,omitempty"`
-	DBName   ValueOrValueFrom `json:"dbname,omitempty"`
-	SSLMode  ValueOrValueFrom `json:"sslmode,omitempty"`
+	Host          ValueOrValueFrom `json:"host,omitempty"`
+	Port          ValueOrValueFrom `json:"port,omitempty"`
+	User          ValueOrValueFrom `json:"user,omitempty"`
+	Password      ValueOrValueFrom `json:"password,omitempty"`
+	DBName        ValueOrValueFrom `json:"dbname,omitempty"`
+	SSLMode       ValueOrValueFrom `json:"sslmode,omitempty"`
+	CurrentSchema ValueOrValueFrom `json:"schema,omitempty"`
 }

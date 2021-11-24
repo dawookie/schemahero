@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Replicated, Inc.
+Copyright 2019 The SchemaHero Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -69,80 +69,65 @@ func (r *ReconcileDatabase) Reconcile(ctx context.Context, request reconcile.Req
 	schemaHeroManagerImage := fmt.Sprintf("%s:%s", r.managerImage, r.managerTag)
 
 	vaultAnnotations, err := databaseInstance.GetVaultAnnotations()
-
 	if err != nil {
-		logger.Error(err)
+		logger.Error(errors.Wrap(err, "failed to get vault annotations"))
 		return reconcile.Result{}, err
 	}
+
 	if vaultAnnotations == nil {
 		vaultAnnotations = map[string]string{}
 	}
 
 	if err := r.reconcileRBAC(ctx, databaseInstance); err != nil {
-		logger.Error(err)
-		return reconcile.Result{}, nil
+		logger.Error(errors.Wrap(err, "failed to reconcile rbac"))
+		return reconcile.Result{}, err
 	}
 
 	// TODO detect k8s version and use appsv1 or appsv1beta
 
-	existingStatefulset := appsv1.StatefulSet{}
-	err = r.Get(ctx, types.NamespacedName{
-		Namespace: databaseInstance.Namespace,
-		Name:      statefulsetName,
-	}, &existingStatefulset)
-	if kuberneteserrors.IsNotFound(err) {
-		// create
-
-		serviceAccountName := fmt.Sprintf("schemahero-%s", databaseInstance.Name)
-
-		statefulSet := appsv1.StatefulSet{
-			TypeMeta: metav1.TypeMeta{
-				APIVersion: "apps/v1",
-				Kind:       "StatefulSet",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      statefulsetName,
-				Namespace: databaseInstance.Namespace,
-				Labels: map[string]string{
+	serviceAccountName := fmt.Sprintf("schemahero-%s", databaseInstance.Name)
+	labels := createLabels(databaseInstance)
+	desiredStatefulSet := appsv1.StatefulSet{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apps/v1",
+			Kind:       "StatefulSet",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      statefulsetName,
+			Namespace: databaseInstance.Namespace,
+			Labels:    *labels,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
 					"control-plane": "schemahero",
 					"database":      databaseInstance.Name,
 				},
 			},
-			Spec: appsv1.StatefulSetSpec{
-				Selector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"control-plane": "schemahero",
-						"database":      databaseInstance.Name,
-					},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      *labels,
+					Annotations: vaultAnnotations,
 				},
-				Template: corev1.PodTemplateSpec{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							"control-plane": "schemahero",
-							"database":      databaseInstance.Name,
-						},
-						Annotations: vaultAnnotations,
-					},
-					Spec: corev1.PodSpec{
-						Affinity: &corev1.Affinity{
-							NodeAffinity: &corev1.NodeAffinity{
-								RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-									NodeSelectorTerms: []corev1.NodeSelectorTerm{
-										{
-											MatchExpressions: []corev1.NodeSelectorRequirement{
-												{
-													Key:      "kubernetes.io/os",
-													Operator: corev1.NodeSelectorOpIn,
-													Values: []string{
-														"linux",
-													},
+				Spec: corev1.PodSpec{
+					Affinity: &corev1.Affinity{
+						NodeAffinity: &corev1.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+								NodeSelectorTerms: []corev1.NodeSelectorTerm{
+									{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      "kubernetes.io/os",
+												Operator: corev1.NodeSelectorOpIn,
+												Values: []string{
+													"linux",
 												},
-												{
-													Key:      "kubernetes.io/arch",
-													Operator: corev1.NodeSelectorOpIn,
-													Values: []string{
-														"amd64",
-													},
+											},
+											{
+												Key:      "kubernetes.io/arch",
+												Operator: corev1.NodeSelectorOpIn,
+												Values: []string{
+													"amd64",
 												},
 											},
 										},
@@ -150,55 +135,80 @@ func (r *ReconcileDatabase) Reconcile(ctx context.Context, request reconcile.Req
 								},
 							},
 						},
-						TerminationGracePeriodSeconds: &tenSeconds,
-						ServiceAccountName:            serviceAccountName,
-						Containers: []corev1.Container{
-							{
-								Image:           schemaHeroManagerImage,
-								ImagePullPolicy: corev1.PullAlways,
-								Name:            "manager",
-								Command:         []string{"/manager"},
-								Args: []string{
-									"run",
-									"--namespace", databaseInstance.Namespace,
-									"--database-name", databaseInstance.Name,
+					},
+					TerminationGracePeriodSeconds: &tenSeconds,
+					ServiceAccountName:            serviceAccountName,
+					Containers: []corev1.Container{
+						{
+							Image:           schemaHeroManagerImage,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Name:            "manager",
+							Command:         []string{"/manager"},
+							Args: []string{
+								"run",
+								"--namespace", databaseInstance.Namespace,
+								"--database-name", databaseInstance.Name,
+							},
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("1"),
+									corev1.ResourceMemory: resource.MustParse("150Mi"),
 								},
-								Resources: corev1.ResourceRequirements{
-									Limits: corev1.ResourceList{
-										corev1.ResourceCPU:    resource.MustParse("1"),
-										corev1.ResourceMemory: resource.MustParse("150Mi"),
-									},
-									Requests: corev1.ResourceList{
-										corev1.ResourceCPU:    resource.MustParse("100m"),
-										corev1.ResourceMemory: resource.MustParse("50Mi"),
-									},
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("10m"),
+									corev1.ResourceMemory: resource.MustParse("50Mi"),
 								},
 							},
 						},
 					},
 				},
 			},
-		}
+		},
+	}
 
-		if err := controllerutil.SetControllerReference(databaseInstance, &statefulSet, r.scheme); err != nil {
+	existingStatefulset := appsv1.StatefulSet{}
+	err = r.Get(ctx, types.NamespacedName{
+		Namespace: databaseInstance.Namespace,
+		Name:      statefulsetName,
+	}, &existingStatefulset)
+
+	if err == nil {
+		existingStatefulset.Spec = *desiredStatefulSet.Spec.DeepCopy()
+		if err := r.Update(ctx, &desiredStatefulSet); err != nil {
+			logger.Error(err)
+			return reconcile.Result{}, err
+		}
+	} else if kuberneteserrors.IsNotFound(err) {
+		if err := controllerutil.SetControllerReference(databaseInstance, &desiredStatefulSet, r.scheme); err != nil {
 			logger.Error(err)
 			return reconcile.Result{}, err
 		}
 
-		if err := r.Create(ctx, &statefulSet); err != nil {
+		if err := r.Create(ctx, &desiredStatefulSet); err != nil {
 			logger.Error(err)
 			return reconcile.Result{}, err
 		}
 	} else if err != nil {
-		logger.Error(err)
-		return reconcile.Result{}, nil
-	} else {
-		// update with the new database details
-
-		logger.Error(errors.New("updating table reconciler is not implemented"))
+		logger.Error(errors.Wrapf(err, "failed to get statefulset %s", statefulsetName))
+		return reconcile.Result{}, err
 	}
 
 	return reconcile.Result{}, nil
+}
+
+func createLabels(db *databasesv1alpha4.Database) *map[string]string {
+	l := map[string]string{
+		"control-plane": "schemahero",
+		"database":      db.Name,
+	}
+
+	if db.Spec.Template != nil {
+		for k, v := range db.Spec.Template.ObjectMeta.Labels {
+			l[k] = v
+		}
+	}
+
+	return &l
 }
 
 func (r *ReconcileDatabase) getInstance(request reconcile.Request) (*databasesv1alpha4.Database, error) {

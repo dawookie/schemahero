@@ -2,36 +2,67 @@ name: "Build and test"
 on:
   push:
     tags-ignore: ["*"] # tags run tagged-release workflow
-    branches: ["*"]
+    branches: ["**"]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@v2.1.3
+      - uses: actions/setup-go@v2.1.4
         with:
-          go-version: "1.15.5"
+          go-version: "1.16.5"
+
+      - id: go-cache-paths
+        run: |
+          echo "::set-output name=go-build::$(go env GOCACHE)"
+          echo "::set-output name=go-mod::$(go env GOMODCACHE)"
+
       - uses: actions/checkout@v2
-      - run: make all
-      - uses: actions/upload-artifact@v2.2.2
+
+      - uses: actions/cache@v2
+        with:
+          path: ${{ steps.go-cache-paths.outputs.go-build }}
+          key: ${{ runner.os }}-go-build-${{ hashFiles('**/go.sum') }}
+      - uses: actions/cache@v2
+        with:
+          path: ${{ steps.go-cache-paths.outputs.go-mod }}
+          key: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}
+
+      - run: make fmt
+      - run: go mod tidy
+      - run: git diff
+      - run: make vet manifests bin/kubectl-schemahero manager test
+      - uses: actions/upload-artifact@v2.2.4
         with:
           name: kubectl-schemahero
           path: bin/kubectl-schemahero
-      - uses: actions/upload-artifact@v2.2.2
+      - uses: actions/upload-artifact@v2.2.4
         with:
           name: manager
           path: bin/manager
+
+  release-tarballs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v2.1.4
+        with:
+          go-version: "1.16.5"
+
+      - uses: actions/checkout@v2
+
+      - run: make release-tarballs
+      - run: ls -alh ./release
 
   test-postgres:
     runs-on: ubuntu-latest
     needs: build
     strategy:
       matrix:
-        postgres_version: ["10.14", "11.9", "12.4", "13-beta3"]
+        postgres_version: ["10.16", "11.11", "12.6", "13.2"]
     steps:
       - uses: actions/checkout@v2
       - name: Download kubectl-schemahero binary
-        uses: actions/download-artifact@v2.0.8
+        uses: actions/download-artifact@v2.0.10
         with:
           name: kubectl-schemahero
           path: bin/
@@ -43,11 +74,11 @@ jobs:
     needs: build
     strategy:
       matrix:
-        mysql_version: ["5.6.49", "5.7.31", "8.0.21"]
+        mysql_version: ["5.6.51", "5.7.33", "8.0.23"]
     steps:
       - uses: actions/checkout@v2
       - name: Download kubectl-schemahero binary
-        uses: actions/download-artifact@v2.0.8
+        uses: actions/download-artifact@v2.0.10
         with:
           name: kubectl-schemahero
           path: bin/
@@ -59,11 +90,11 @@ jobs:
     needs: build
     strategy:
       matrix:
-        cockroachdb_version: ["v19.2.9", "v20.1.4"]
+        cockroachdb_version: ["v19.2.12", "v20.1.13", "v20.2.6", "v21.1.2"]
     steps:
       - uses: actions/checkout@v2
       - name: Download kubectl-schemahero binary
-        uses: actions/download-artifact@v2.0.8
+        uses: actions/download-artifact@v2.0.10
         with:
           name: kubectl-schemahero
           path: bin/
@@ -75,11 +106,11 @@ jobs:
     needs: build
     strategy:
       matrix:
-        cassandra_version: ["3.11.8"]
+        cassandra_version: ["3.11.10"]
     steps:
       - uses: actions/checkout@v2
       - name: Download kubectl-schemahero binary
-        uses: actions/download-artifact@v2.0.8
+        uses: actions/download-artifact@v2.0.10
         with:
           name: kubectl-schemahero
           path: bin/
@@ -95,49 +126,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Download kubectl-schemahero binary
-        uses: actions/download-artifact@v2.0.8
+        uses: actions/download-artifact@v2.0.10
         with:
           name: kubectl-schemahero
           path: bin/
       - run: chmod +x bin/kubectl-schemahero
       - run: make -C integration/tests/sqlite ${{matrix.sqlite_version}}
 
-  kots:
-    runs-on: ubuntu-latest
-    name: kots
-    needs: [test-mysql, test-postgres]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Download kubectl-schemahero binary
-        uses: actions/download-artifact@v2.0.8
-        with:
-          name: kubectl-schemahero
-          path: bin/
-      - run: chmod +x bin/kubectl-schemahero
-
-      - uses: azure/docker-login@v1
-        with:
-          login-server: registry.replicated.com
-          username: ${{ secrets.REPLICATED_API_TOKEN }}
-          password: ${{ secrets.REPLICATED_API_TOKEN }}
-      - run: make kotsimages
-
-      - run: ./bin/kubectl-schemahero install --yaml --out-dir=./kots --enterprise --namespace="repl{{ Namespace }}" --enterprise-tag=alpha
-
-      - name: Lint the release
-        id: lint-action
-        uses: replicatedhq/action-kots-lint@v0.2.0
-        with:
-          replicated-app: "schemahero-enterprise"
-          replicated-api-token: ${{ secrets.REPLICATED_API_TOKEN }}
-          yaml-dir: kots
-
-      - name: Create the release
-        id: test-action
-        uses: replicatedhq/action-kots-release@v0.5.0
-        with:
-          replicated-app: "schemahero-enterprise"
-          replicated-api-token: ${{ secrets.REPLICATED_API_TOKEN }}
-          yaml-dir: kots

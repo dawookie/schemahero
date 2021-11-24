@@ -97,12 +97,7 @@ func GetMigrationsCmd() *cobra.Command {
 
 			rows := [][]string{}
 			for _, m := range matchingMigrations {
-				table, err := migration.TableFromMigration(context.Background(), &m)
-				if err != nil {
-					return err
-				}
-
-				database, err := migration.DatabaseFromTable(context.Background(), table)
+				table, err := migration.TableFromMigration(ctx, &m)
 				if err != nil {
 					return err
 				}
@@ -119,7 +114,7 @@ func GetMigrationsCmd() *cobra.Command {
 				if isIncluded {
 					rows = append(rows, []string{
 						m.Name,
-						database.Name,
+						table.Spec.Database,
 						table.Name,
 						timestampToAge(m.Status.PlannedAt),
 						timestampToAge(m.Status.ExecutedAt),
@@ -159,7 +154,7 @@ func timestampToAge(t int64) string {
 		return ""
 	}
 
-	d := time.Now().Sub(time.Unix(t, 0))
+	d := time.Since(time.Unix(t, 0))
 	if d < time.Duration(time.Minute) {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	} else if d < time.Duration(time.Minute*10) {

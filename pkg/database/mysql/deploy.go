@@ -16,7 +16,7 @@ func PlanMysqlTable(uri string, tableName string, mysqlTableSchema *schemasv1alp
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to connect to mysql")
 	}
-	defer m.db.Close()
+	defer m.Close()
 
 	// determine if the table exists
 	query := `select count(1) from information_schema.TABLES where TABLE_NAME = ? and TABLE_SCHEMA = ?`
@@ -53,6 +53,20 @@ func PlanMysqlTable(uri string, tableName string, mysqlTableSchema *schemasv1alp
 	}
 	statements = append(statements, charsetAndCollationStatements...)
 
+	// remove primary keys before removing columns
+	removePrimaryKeyStatements, err := buildRemovePrimaryKeyStatements(m, tableName, mysqlTableSchema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build remove primary key statements")
+	}
+	statements = append(statements, removePrimaryKeyStatements...)
+
+	// indexes need to be removed before columns are removed
+	removeIndexStatements, err := buildRemoveIndexStatements(m, tableName, mysqlTableSchema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build remove index statements")
+	}
+	statements = append(statements, removeIndexStatements...)
+
 	// table needs to be altered?
 	columnStatements, err := buildColumnStatements(m, tableName, mysqlTableSchema)
 	if err != nil {
@@ -61,11 +75,11 @@ func PlanMysqlTable(uri string, tableName string, mysqlTableSchema *schemasv1alp
 	statements = append(statements, columnStatements...)
 
 	// primary key changes
-	primaryKeyStatements, err := buildPrimaryKeyStatements(m, tableName, mysqlTableSchema)
+	addPrimaryKeyStatements, err := buildAddPrimaryKeyStatements(m, tableName, mysqlTableSchema)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to build primary key statements")
+		return nil, errors.Wrap(err, "failed to build add primary key statements")
 	}
-	statements = append(statements, primaryKeyStatements...)
+	statements = append(statements, addPrimaryKeyStatements...)
 
 	// foreign key changes
 	foreignKeyStatements, err := buildForeignKeyStatements(m, tableName, mysqlTableSchema)
@@ -74,12 +88,12 @@ func PlanMysqlTable(uri string, tableName string, mysqlTableSchema *schemasv1alp
 	}
 	statements = append(statements, foreignKeyStatements...)
 
-	// index changes
-	indexStatements, err := buildIndexStatements(m, tableName, mysqlTableSchema)
+	// add indexes after columns are added
+	addIndexStatements, err := buildAddIndexStatements(m, tableName, mysqlTableSchema)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to build index statements")
+		return nil, errors.Wrap(err, "failed to build add index statements")
 	}
-	statements = append(statements, indexStatements...)
+	statements = append(statements, addIndexStatements...)
 
 	return statements, nil
 }
@@ -208,6 +222,8 @@ where TABLE_NAME = ?`
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query from information_schema")
 	}
+	defer rows.Close()
+
 	alterAndDropStatements := []string{}
 	foundColumnNames := []string{}
 	for rows.Next() {
@@ -292,7 +308,7 @@ where TABLE_NAME = ?`
 	return alterAndDropStatements, nil
 }
 
-func buildPrimaryKeyStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
+func buildRemovePrimaryKeyStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
 	currentPrimaryKey, err := m.GetTablePrimaryKey(tableName)
 	if err != nil {
 		return nil, err
@@ -317,6 +333,27 @@ func buildPrimaryKeyStatements(m *MysqlConnection, tableName string, mysqlTableS
 		}.String())
 	}
 
+	return statements, nil
+}
+
+func buildAddPrimaryKeyStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
+	currentPrimaryKey, err := m.GetTablePrimaryKey(tableName)
+	if err != nil {
+		return nil, err
+	}
+	var mysqlTableSchemaPrimaryKey *types.KeyConstraint
+	if len(mysqlTableSchema.PrimaryKey) > 0 {
+		mysqlTableSchemaPrimaryKey = &types.KeyConstraint{
+			IsPrimary: true,
+			Columns:   mysqlTableSchema.PrimaryKey,
+		}
+	}
+
+	if mysqlTableSchemaPrimaryKey.Equals(currentPrimaryKey) {
+		return nil, nil
+	}
+
+	var statements []string
 	if mysqlTableSchemaPrimaryKey != nil {
 		statements = append(statements, AlterAddConstrantStatement{
 			TableName:  tableName,
@@ -375,7 +412,7 @@ func buildForeignKeyStatements(m *MysqlConnection, tableName string, mysqlTableS
 	return foreignKeyStatements, nil
 }
 
-func buildIndexStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
+func buildRemoveIndexStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
 	indexStatements := []string{}
 	currentIndexes, err := m.ListTableIndexes(m.databaseName, tableName)
 	if err != nil {
@@ -393,6 +430,15 @@ func buildIndexStatements(m *MysqlConnection, tableName string, mysqlTableSchema
 		if !isMatch {
 			indexStatements = append(indexStatements, RemoveIndexStatement(tableName, currentIndex))
 		}
+	}
+	return indexStatements, nil
+}
+
+func buildAddIndexStatements(m *MysqlConnection, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema) ([]string, error) {
+	indexStatements := []string{}
+	currentIndexes, err := m.ListTableIndexes(m.databaseName, tableName)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, desiredIndex := range mysqlTableSchema.Indexes {

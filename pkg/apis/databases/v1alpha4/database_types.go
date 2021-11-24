@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Replicated, Inc.
+Copyright 2019 The SchemaHero Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,8 +37,15 @@ type SchemaHero struct {
 type DatabaseSpec struct {
 	Connection         DatabaseConnection `json:"connection,omitempty"`
 	EnableShellCommand bool               `json:"enableShellCommand,omitempty"`
-	ImmediateDeploy    bool               `json:"immediateDeploy,omitempty"`
-	SchemaHero         *SchemaHero        `json:"schemahero,omitempty"`
+
+	//+kubebuilder:default:=false
+	ImmediateDeploy bool              `json:"immediateDeploy,omitempty"`
+	SchemaHero      *SchemaHero       `json:"schemahero,omitempty"`
+	Template        *DatabaseTemplate `json:"template,omitempty"`
+}
+
+type DatabaseTemplate struct {
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 }
 
 // DatabaseStatus defines the observed state of Database
@@ -51,6 +58,9 @@ type DatabaseStatus struct {
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Database is the Schema for the databases API
+// +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.metadata.namespace`,priority=1
+// +kubebuilder:printcolumn:name="Deploy Immediately",type=boolean,JSONPath=`.spec.immediateDeploy`,priority=1
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +k8s:openapi-gen=true
 // +kubebuilder:subresource:status
 type Database struct {

@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Replicated, Inc.
+Copyright 2019 The SchemaHero Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ func (d Database) getVaultDetails() (*Vault, error) {
 	if d.Spec.Connection.Mysql != nil {
 		return d.Spec.Connection.Mysql.URI.GetVaultDetails()
 	}
-	return nil, fmt.Errorf("No database connection configured for database: %s", d.Name)
+	return nil, fmt.Errorf("no database connection configured for database: %s", d.Name)
 }
 
 func (d Database) getDbType() (string, error) {
@@ -66,7 +66,7 @@ func (d Database) getDbType() (string, error) {
 	if d.Spec.Connection.Mysql != nil {
 		return "mysql", nil
 	}
-	return "", fmt.Errorf("No database connection configured for database: %s", d.Name)
+	return "", fmt.Errorf("no database connection configured for database: %s", d.Name)
 }
 
 // GetVaultAnnotations configures the required Vault annotations to
@@ -104,15 +104,9 @@ func (d *Database) GetVaultAnnotations() (map[string]string, error) {
 	} else {
 		switch db {
 		case "postgres", "cockroachdb":
-			if connTemplate == "" {
-				template = fmt.Sprintf(`
+			template = fmt.Sprintf(`
 {{- with secret "database/creds/%s" -}}
 postgres://{{ .Data.username }}:{{ .Data.password }}@postgres:5432/%s{{- end }}`, v.Role, d.Name)
-			} else {
-				template = fmt.Sprintf(`
-{{- with secret "database/creds/%s" -}}
-%s`, v.Role, connTemplate)
-			}
 
 		case "mysql":
 			template = fmt.Sprintf(`

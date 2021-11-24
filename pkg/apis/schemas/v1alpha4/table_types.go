@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Replicated, Inc.
+Copyright 2019 The SchemaHero Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -55,6 +55,10 @@ type TableStatus struct {
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Table is the Schema for the tables API
+// +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.metadata.namespace`,priority=1
+// +kubebuilder:printcolumn:name="Table",type=string,JSONPath=`.spec.name`
+// +kubebuilder:printcolumn:name="Database",type=string,JSONPath=`.spec.database`
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +k8s:openapi-gen=true
 type Table struct {
 	metav1.TypeMeta   `json:",inline"`

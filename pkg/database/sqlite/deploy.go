@@ -15,7 +15,7 @@ func PlanSqliteTable(dsn string, tableName string, sqliteTableSchema *schemasv1a
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to connect to sqlite")
 	}
-	defer s.db.Close()
+	defer s.Close()
 
 	tableExists := 0
 	row := s.db.QueryRow("select count(1) from sqlite_master where type=? and name=?", "table", tableName)
@@ -85,13 +85,14 @@ p.dflt_value AS col_default_val,
 p.[notnull] AS col_is_not_null
 FROM sqlite_master m
 LEFT OUTER JOIN pragma_table_info((m.name)) p
-ON m.name <> p.name
 WHERE m.type = 'table'
 AND m.name = ?`
 	rows, err := s.db.Query(query, tableName)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query from sqlite_master")
 	}
+	defer rows.Close()
+
 	alterAndDropStatements := []string{}
 	foundColumnNames := []string{}
 	for rows.Next() {
@@ -137,7 +138,7 @@ AND m.name = ?`
 				if err != nil {
 					return nil, errors.Wrap(err, "failed to convert desired column")
 				}
-				if !columnsMatch(colA, &existingColumn) {
+				if !columnsMatch(*colA, existingColumn) {
 					needsRecreate = true
 				}
 			}

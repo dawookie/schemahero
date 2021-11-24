@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Replicated, Inc.
+Copyright 2019 The SchemaHero Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// getVaultConnection returns the driver, the resolved URI, or an error
 func (d *Database) getVaultConnection(ctx context.Context, clientset kubernetes.Interface, driver string, valueOrValueFrom ValueOrValueFrom) (string, string, error) {
 	// if the value is in vault and we are using the vault injector, just read the file
 	if valueOrValueFrom.ValueFrom.Vault.AgentInject {
@@ -142,7 +143,9 @@ func (d *Database) getVaultConnection(ctx context.Context, clientset kubernetes.
 	}
 
 	uriTemplate, err := getConnectionURITemplate(valueOrValueFrom.ValueFrom.Vault, loginResponse.Auth.ClientToken, d.Name)
-
+	if err != nil {
+		return "", "", errors.Wrap(err, "failed to get connection URI Template")
+	}
 	funcMap := template.FuncMap{}
 	funcMap["username"] = func() string {
 		return credsResponse.Data["username"].(string)

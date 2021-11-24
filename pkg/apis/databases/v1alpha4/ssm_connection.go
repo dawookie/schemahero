@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Replicated, Inc.
+Copyright 2019 The SchemaHero Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,20 +20,22 @@ import (
 	"context"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
+// getSSMConnection returns the driver, the resolved value, and any error
 func (d *Database) getSSMConnection(ctx context.Context, clientset *kubernetes.Clientset, driver string, valueOrValueFrom ValueOrValueFrom) (string, string, error) {
 	region := valueOrValueFrom.ValueFrom.SSM.Region
 	if region == "" {
 		region = "us-east-1"
 	}
 
-	cfg, err := external.LoadDefaultAWSConfig()
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return "", "", errors.Wrap(err, "failed to create aws config")
 	}
@@ -62,20 +64,19 @@ func (d *Database) getSSMConnection(ctx context.Context, clientset *kubernetes.C
 			accessKeyID = string(secret.Data[valueOrValueFrom.ValueFrom.SSM.SecretAccessKey.ValueFrom.SecretKeyRef.Key])
 		}
 
-		cfg.Credentials = aws.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, "")
+		cfg.Credentials = credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, "")
 	}
 
-	client := ssm.New(cfg)
+	client := ssm.NewFromConfig(cfg)
 
 	params := ssm.GetParameterInput{
-		WithDecryption: aws.Bool(valueOrValueFrom.ValueFrom.SSM.WithDecryption),
+		WithDecryption: valueOrValueFrom.ValueFrom.SSM.WithDecryption,
 		Name:           aws.String(valueOrValueFrom.ValueFrom.SSM.Name),
 	}
-	req := client.GetParameterRequest(&params)
-	resp, err := req.Send(ctx)
+	out, err := client.GetParameter(ctx, &params)
 	if err != nil {
 		return "", "", errors.Wrap(err, "failed to get ssm parameter")
 	}
 
-	return driver, *resp.Parameter.Value, nil
+	return driver, *out.Parameter.Value, nil
 }
