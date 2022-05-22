@@ -7,6 +7,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/schemahero/schemahero/pkg/database"
+	"github.com/schemahero/schemahero/pkg/files"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -76,34 +77,49 @@ func PlanCmd() *cobra.Command {
 			}
 
 			db := database.Database{
-				InputDir:  v.GetString("input-dir"),
-				OutputDir: v.GetString("output-dir"),
-				Driver:    v.GetString("driver"),
-				URI:       v.GetString("uri"),
-				Hosts:     v.GetStringSlice("host"),
-				Username:  v.GetString("username"),
-				Password:  v.GetString("password"),
-				Keyspace:  v.GetString("keyspace"),
+				InputDir:       v.GetString("input-dir"),
+				OutputDir:      v.GetString("output-dir"),
+				Driver:         v.GetString("driver"),
+				URI:            v.GetString("uri"),
+				Hosts:          v.GetStringSlice("host"),
+				Username:       v.GetString("username"),
+				Password:       v.GetString("password"),
+				Keyspace:       v.GetString("keyspace"),
+				DeploySeedData: v.GetBool("seed-data"),
 			}
 
 			if fi.Mode().IsDir() {
 				err := filepath.Walk(v.GetString("spec-file"), func(path string, info os.FileInfo, err error) error {
-					if !info.IsDir() {
-						statements, err := db.PlanSyncFromFile(path, v.GetString("spec-type"))
-						if err != nil {
-							return err
-						}
+					isHidden, err := files.IsHidden(path)
+					if err != nil {
+						return err
+					}
 
-						if f != nil {
-							for _, statement := range statements {
-								if _, err := f.WriteString(fmt.Sprintf("%s;\n", statement)); err != nil {
-									return err
-								}
+					if info.IsDir() {
+						if isHidden {
+							return filepath.SkipDir
+						}
+						return nil
+					}
+
+					if isHidden {
+						return nil
+					}
+
+					statements, err := db.PlanSyncFromFile(path, v.GetString("spec-type"))
+					if err != nil {
+						return err
+					}
+
+					if f != nil {
+						for _, statement := range statements {
+							if _, err := f.WriteString(fmt.Sprintf("%s;\n", statement)); err != nil {
+								return err
 							}
-						} else {
-							for _, statement := range statements {
-								fmt.Printf("%s;\n", statement)
-							}
+						}
+					} else {
+						for _, statement := range statements {
+							fmt.Printf("%s;\n", statement)
 						}
 					}
 
@@ -114,7 +130,7 @@ func PlanCmd() *cobra.Command {
 			} else {
 				statements, err := db.PlanSyncFromFile(v.GetString("spec-file"), v.GetString("spec-type"))
 				if err != nil {
-					return err
+					return fmt.Errorf("plan sync from file %q: %w", v.GetString("spec-file"), err)
 				}
 
 				if f != nil {
@@ -148,5 +164,6 @@ func PlanCmd() *cobra.Command {
 	cmd.Flags().String("out", "", "filename to write DDL statements to, if not present output file be written to stdout")
 	cmd.Flags().Bool("overwrite", true, "when set, will overwrite the out file, if it already exists")
 
+	cmd.Flags().Bool("seed-data", false, "when set, will deploy seed data")
 	return cmd
 }

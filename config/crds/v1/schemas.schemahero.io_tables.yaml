@@ -508,6 +508,35 @@ spec:
                         type: array
                     type: object
                 type: object
+              seedData:
+                properties:
+                  rows:
+                    items:
+                      properties:
+                        columns:
+                          items:
+                            properties:
+                              column:
+                                type: string
+                              value:
+                                properties:
+                                  int:
+                                    type: integer
+                                  str:
+                                    type: string
+                                type: object
+                            required:
+                            - column
+                            - value
+                            type: object
+                          type: array
+                      required:
+                      - columns
+                      type: object
+                    type: array
+                required:
+                - rows
+                type: object
             required:
             - database
             - name

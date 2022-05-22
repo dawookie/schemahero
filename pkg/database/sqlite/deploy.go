@@ -10,7 +10,7 @@ import (
 	"github.com/schemahero/schemahero/pkg/database/types"
 )
 
-func PlanSqliteTable(dsn string, tableName string, sqliteTableSchema *schemasv1alpha4.SqliteTableSchema) ([]string, error) {
+func PlanSqliteTable(dsn string, tableName string, sqliteTableSchema *schemasv1alpha4.SqliteTableSchema, seedData *schemasv1alpha4.SeedData) ([]string, error) {
 	s, err := Connect(dsn)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to connect to sqlite")
@@ -31,6 +31,14 @@ func PlanSqliteTable(dsn string, tableName string, sqliteTableSchema *schemasv1a
 		}, nil
 	}
 
+	seedDataStatements := []string{}
+	if seedData != nil {
+		seedDataStatements, err = SeedDataStatements(tableName, seedData)
+		if err != nil {
+			return nil, errors.Wrap(err, "create seed data statements")
+		}
+	}
+
 	if tableExists == 0 {
 		// shortcut to create it
 		queries, err := CreateTableStatements(tableName, sqliteTableSchema)
@@ -38,7 +46,7 @@ func PlanSqliteTable(dsn string, tableName string, sqliteTableSchema *schemasv1a
 			return nil, errors.Wrap(err, "failed to create table statements")
 		}
 
-		return queries, nil
+		return append(queries, seedDataStatements...), nil
 	}
 
 	statements := []string{}
@@ -70,6 +78,8 @@ func PlanSqliteTable(dsn string, tableName string, sqliteTableSchema *schemasv1a
 	// 	return nil, errors.Wrap(err, "failed to build index statements")
 	// }
 	// statements = append(statements, indexStatements...)
+
+	statements = append(statements, seedDataStatements...)
 
 	return statements, nil
 }

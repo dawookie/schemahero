@@ -11,7 +11,7 @@ import (
 	"github.com/schemahero/schemahero/pkg/database/types"
 )
 
-func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schemasv1alpha4.PostgresqlTableSchema) ([]string, error) {
+func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schemasv1alpha4.PostgresqlTableSchema, seedData *schemasv1alpha4.SeedData) ([]string, error) {
 	p, err := Connect(uri)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to connect to postgres")
@@ -34,6 +34,14 @@ func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schema
 		}, nil
 	}
 
+	seedDataStatements := []string{}
+	if seedData != nil {
+		seedDataStatements, err = SeedDataStatements(tableName, postgresTableSchema, seedData)
+		if err != nil {
+			return nil, errors.Wrap(err, "create seed data statements")
+		}
+	}
+
 	if tableExists == 0 {
 		// shortcut to just create it
 		queries, err := CreateTableStatements(tableName, postgresTableSchema)
@@ -41,7 +49,7 @@ func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schema
 			return nil, errors.Wrap(err, "failed to create table statement")
 		}
 
-		return queries, nil
+		return append(queries, seedDataStatements...), nil
 	}
 
 	statements := []string{}
@@ -73,6 +81,8 @@ func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schema
 		return nil, errors.Wrap(err, "failed to build index statements")
 	}
 	statements = append(statements, indexStatements...)
+
+	statements = append(statements, seedDataStatements...)
 
 	return statements, nil
 }

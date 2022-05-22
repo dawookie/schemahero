@@ -162,16 +162,29 @@ func (r *ReconcileTable) plan(ctx context.Context, databaseInstance *databasesv1
 	}
 
 	db := database.Database{
-		Driver: driver,
-		URI:    connectionURI,
+		Driver:         driver,
+		URI:            connectionURI,
+		DeploySeedData: databaseInstance.Spec.DeploySeedData,
 	}
 
-	statements, err := db.PlanSyncTableSpec(&tableInstance.Spec)
+	// plan the schema
+	schemaStatements, err := db.PlanSyncTableSpec(&tableInstance.Spec)
 	if err != nil {
 		return reconcile.Result{}, errors.Wrap(err, "failed to plan sync")
 	}
 
-	if len(statements) == 0 {
+	// plan the seed data
+	seedStatements := []string{}
+	if databaseInstance.Spec.DeploySeedData {
+		stmts, err := db.PlanSyncSeedData(&tableInstance.Spec)
+		if err != nil {
+			return reconcile.Result{}, errors.Wrap(err, "failed to plan seed")
+		}
+
+		seedStatements = append(seedStatements, stmts...)
+	}
+
+	if len(schemaStatements) == 0 && len(seedStatements) == 0 {
 		return reconcile.Result{}, nil
 	}
 
@@ -179,10 +192,10 @@ func (r *ReconcileTable) plan(ctx context.Context, databaseInstance *databasesv1
 	if err != nil {
 		return reconcile.Result{}, errors.Wrap(err, "failed to get sha of table")
 	}
-
 	tableSHA = tableSHA[:7]
 
-	generatedDDL := strings.Join(statements, ";\n")
+	allGeneratedStatements := append(schemaStatements, seedStatements...)
+	generatedDDL := strings.Join(allGeneratedStatements, ";\n")
 
 	migration := schemasv1alpha4.Migration{
 		TypeMeta: metav1.TypeMeta{
