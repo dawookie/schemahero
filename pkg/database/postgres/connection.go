@@ -27,6 +27,10 @@ func (p *PostgresConnection) EngineVersion() string {
 	return p.engineVersion
 }
 
+func (p *PostgresConnection) GetConnection() *pgx.Conn {
+	return p.conn
+}
+
 func Connect(uri string) (*PostgresConnection, error) {
 	conn, err := pgx.Connect(context.Background(), uri)
 	if err != nil {
@@ -96,4 +100,12 @@ func parsePostgresVersion(reportedVersion string) (string, error) {
 	}
 
 	return fmt.Sprintf("%s.%s.%s", major, minor, patch), nil
+}
+
+func SanitizeArray(idents []string) []string {
+	var idents_ []string
+	for _, ident := range idents {
+		idents_ = append(idents_, pgx.Identifier{ident}.Sanitize())
+	}
+	return idents_
 }

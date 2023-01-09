@@ -27,6 +27,8 @@ type DatabaseConnection struct {
 	CockroachDB *CockroachDBConnection `json:"cockroachdb,omitempty"`
 	Cassandra   *CassandraConnection   `json:"cassandra,omitempty"`
 	SQLite      *SqliteConnection      `json:"sqlite,omitempty"`
+	RQLite      *RqliteConnection      `json:"rqlite,omitempty"`
+	TimescaleDB *PostgresConnection    `json:"timescaledb,omitempty"`
 }
 
 type SchemaHero struct {

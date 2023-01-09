@@ -5,7 +5,7 @@ export IMAGE
 export GO111MODULE=on
 
 .PHONY: run
-run: 5.6.51 5.7.33 8.0.23
+run: 5.6.51 5.7.40 8.0.31
 
 .PHONY: 5.6.51
 5.6.51: export MYSQL_VERSION = 5.6.51
@@ -39,10 +39,11 @@ run: 5.6.51 5.7.33 8.0.23
 	make -C multiline-seed run
 	make -C multi-column-index run
 	make -C primary-key-keep run
+	make -C unchanged-charset run
 
-.PHONY: 5.7.33
-5.7.33: export MYSQL_VERSION = 5.7.33
-5.7.33:
+.PHONY: 5.7.40
+5.7.40: export MYSQL_VERSION = 5.7.40
+5.7.40:
 	make -C decimal run
 	make -C medium-text run
 	make -C medium-blob run
@@ -72,10 +73,11 @@ run: 5.6.51 5.7.33 8.0.23
 	make -C multiline-seed run
 	make -C multi-column-index run
 	make -C primary-key-keep run
+	make -C unchanged-charset run
 
-.PHONY: 8.0.23
-8.0.23: export MYSQL_VERSION = 8.0.23
-8.0.23:
+.PHONY: 8.0.31
+8.0.31: export MYSQL_VERSION = 8.0.31
+8.0.31:
 	make -C decimal run
 	make -C medium-text run
 	make -C medium-blob run
@@ -106,6 +108,7 @@ run: 5.6.51 5.7.33 8.0.23
 	make -C multiline-seed run
 	make -C multi-column-index run
 	make -C primary-key-keep run
+	make -C unchanged-charset run
 
 .PHONY: build
 build: docker-build

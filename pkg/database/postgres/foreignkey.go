@@ -25,8 +25,8 @@ func foreignKeyConstraintClause(tableName string, schemaForeignKey *schemasv1alp
 
 	return fmt.Sprintf("constraint %s foreign key (%s) references %s (%s)%s",
 		types.GeneratePostgresqlFKName(tableName, schemaForeignKey),
-		strings.Join(schemaForeignKey.Columns, ", "),
-		schemaForeignKey.References.Table,
-		strings.Join(schemaForeignKey.References.Columns, ", "),
+		strings.Join(SanitizeArray(schemaForeignKey.Columns), ", "),
+		pgx.Identifier{schemaForeignKey.References.Table}.Sanitize(),
+		strings.Join(SanitizeArray(schemaForeignKey.References.Columns), ", "),
 		onDelete)
 }
