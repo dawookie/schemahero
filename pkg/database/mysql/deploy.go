@@ -11,6 +11,10 @@ import (
 	"github.com/schemahero/schemahero/pkg/database/types"
 )
 
+func PlanMysqlView(uri string, viewName string, mysqlViewSchema *schemasv1alpha4.NotImplementedViewSchema) ([]string, error) {
+	return nil, errors.New("not implemented")
+}
+
 func PlanMysqlTable(uri string, tableName string, mysqlTableSchema *schemasv1alpha4.MysqlTableSchema, seedData *schemasv1alpha4.SeedData) ([]string, error) {
 	m, err := Connect(uri)
 	if err != nil {
@@ -175,28 +179,26 @@ WHERE schema_name = ?`
 
 	// fill in defaults where needed
 	if mysqlTableSchema.Collation == "" {
+		// If charset didn't change, don't change collation. MySQL has it set to the default for the charset already.
+		if mysqlTableSchema.DefaultCharset == existingTableCharset {
+			return []string{}, nil
+		}
+
+		// If default charset is set, but not collation, let the database pick correct collation automatically
+		// Char sets that are aliases (like utf8) will not necessarily have a record in information_schema.character_sets,
+		// so we can't always look up the correct collation
 		if mysqlTableSchema.DefaultCharset == "" {
 			mysqlTableSchema.Collation = databaseCollation
 			mysqlTableSchema.DefaultCharset = databaseCharset
-		} else {
-			// get the default collation for the charset
-			query = `select DEFAULT_COLLATE_NAME from information_schema.character_sets where CHARACTER_SET_NAME = ?`
-			row = m.db.QueryRow(query, mysqlTableSchema.DefaultCharset)
-			var defaultCollationForCharset string
-			if err := row.Scan(&defaultCollationForCharset); err != nil {
-				return nil, errors.Wrap(err, "failed to read default collation for charset")
-			}
-			mysqlTableSchema.Collation = defaultCollationForCharset
 		}
-	}
-	if mysqlTableSchema.DefaultCharset == "" {
+	} else if mysqlTableSchema.DefaultCharset == "" {
 		// here the collation must have been set, but not the charset
 		// get the charset associated with the collation
 		query = `select CHARACTER_SET_NAME from information_schema.collations where COLLATION_NAME = ?`
 		row = m.db.QueryRow(query, mysqlTableSchema.Collation)
 		var collationCharset string
 		if err := row.Scan(&collationCharset); err != nil {
-			return nil, errors.Wrap(err, "failed to read charset for collation")
+			return nil, errors.Wrapf(err, "failed to read charset for collation %s", mysqlTableSchema.Collation)
 		}
 		mysqlTableSchema.DefaultCharset = collationCharset
 	}
@@ -218,9 +220,15 @@ WHERE schema_name = ?`
 		return []string{}, nil
 	}
 
-	return []string{
-		fmt.Sprintf("alter table %s convert to character set %s collate %s", tableName, mysqlTableSchema.DefaultCharset, mysqlTableSchema.Collation),
-	}, nil
+	if mysqlTableSchema.Collation == "" {
+		return []string{
+			fmt.Sprintf("alter table %s convert to character set %s", tableName, mysqlTableSchema.DefaultCharset),
+		}, nil
+	} else {
+		return []string{
+			fmt.Sprintf("alter table %s convert to character set %s collate %s", tableName, mysqlTableSchema.DefaultCharset, mysqlTableSchema.Collation),
+		}, nil
+	}
 }
 
 // getDefaultCharsetAndCollationForTable will return the applied charset, collation for the specifed table
@@ -270,9 +278,10 @@ func buildColumnStatements(m *MysqlConnection, tableName string, mysqlTableSchem
 
 	query := `select
 COLUMN_NAME, COLUMN_DEFAULT, IS_NULLABLE, EXTRA, COLUMN_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_SET_NAME, COLLATION_NAME
-from information_schema.COLUMNS
-where TABLE_NAME = ?`
-	rows, err := m.db.Query(query, tableName)
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = ?
+AND TABLE_NAME = ?`
+	rows, err := m.db.Query(query, m.databaseName, tableName)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query from information_schema")
 	}

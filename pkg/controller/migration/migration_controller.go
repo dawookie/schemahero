@@ -20,6 +20,8 @@ import (
 	"context"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/source"
+
 	"github.com/pkg/errors"
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
 	"github.com/schemahero/schemahero/pkg/logger"
@@ -32,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 // Add creates a new Migration Controller and adds it to the Manager with default RBAC. The Manager will set fields on the Controller
@@ -59,9 +60,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	}
 
 	// Watch for changes to Migration
-	err = c.Watch(&source.Kind{
-		Type: &schemasv1alpha4.Migration{},
-	}, &handler.EnqueueRequestForObject{})
+	err = c.Watch(source.Kind(mgr.GetCache(), &schemasv1alpha4.Migration{}, &handler.TypedEnqueueRequestForObject[*schemasv1alpha4.Migration]{}))
 	if err != nil {
 		return errors.Wrap(err, "failed to start watch on migrations")
 	}

@@ -4,6 +4,7 @@ schema:
   mysql:
     primaryKey: [id]
     defaultCharset: utf16
+    collation: utf16_general_ci
     columns:
       - name: id
         type: integer

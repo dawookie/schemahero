@@ -10,9 +10,9 @@ run: 5.6.51 5.7.40 8.0.31
 .PHONY: 5.6.51
 5.6.51: export MYSQL_VERSION = 5.6.51
 5.6.51:
+	make -C medium-blob run
 	make -C decimal run
 	make -C medium-text run
-	make -C medium-blob run
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-table run
@@ -28,7 +28,7 @@ run: 5.6.51 5.7.40 8.0.31
 	make -C auto-increment-create run
 	make -C auto-increment-add run
 	make -C auto-increment-drop run
-	make -C add-charset run
+	make -C primary-key-change run
 	make -C add-collation run
 	make -C remove-charset run
 	make -C add-charset run
@@ -44,9 +44,9 @@ run: 5.6.51 5.7.40 8.0.31
 .PHONY: 5.7.40
 5.7.40: export MYSQL_VERSION = 5.7.40
 5.7.40:
+	make -C medium-blob run
 	make -C decimal run
 	make -C medium-text run
-	make -C medium-blob run
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-table run
@@ -62,7 +62,7 @@ run: 5.6.51 5.7.40 8.0.31
 	make -C auto-increment-create run
 	make -C auto-increment-add run
 	make -C auto-increment-drop run
-	make -C add-charset run
+	make -C primary-key-change run
 	make -C add-collation run
 	make -C remove-charset run
 	make -C add-charset run
@@ -78,9 +78,9 @@ run: 5.6.51 5.7.40 8.0.31
 .PHONY: 8.0.31
 8.0.31: export MYSQL_VERSION = 8.0.31
 8.0.31:
+	make -C medium-blob run
 	make -C decimal run
 	make -C medium-text run
-	make -C medium-blob run
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-table run
@@ -94,10 +94,10 @@ run: 5.6.51 5.7.40 8.0.31
 	make -C index-drop-add run
 	make -C primary-key-add run
 	make -C primary-key-drop run
+	make -C primary-key-change run
 	make -C auto-increment-create run
 	make -C auto-increment-add run
 	make -C auto-increment-drop run
-	make -C add-charset run
 	make -C add-collation run
 	make -C remove-charset run
 	make -C add-charset run
@@ -116,5 +116,5 @@ build: docker-build
 
 .PHONY: docker-build
 docker-build:
-	docker build -t $(IMAGE) -f ../Dockerfile.schemahero ..
+	docker build -t $(IMAGE) -f ../Dockerfile.multiarch --target --schemahero ..
 	@echo "export IMAGE=$(IMAGE)"

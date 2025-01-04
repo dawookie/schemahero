@@ -9,3 +9,8 @@ schema:
         type: integer
         constraints:
           notNull: true
+      - name: data
+        type: varchar (255)
+        charset: latin1
+        constraints:
+          notNull: true

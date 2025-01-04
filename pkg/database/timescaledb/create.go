@@ -2,13 +2,35 @@ package timescaledb
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v4"
 	"github.com/pkg/errors"
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
 	"github.com/schemahero/schemahero/pkg/database/postgres"
 )
+
+func CreateViewStatements(viewName string, viewSchema *schemasv1alpha4.TimescaleDBViewSchema) ([]string, error) {
+	if viewSchema.IsContinuousAggregate != nil && *viewSchema.IsContinuousAggregate {
+		// continuous aggregate views are created with "create materialized view"
+		withDataStatement := "with data"
+		if viewSchema.WithNoData != nil && *viewSchema.WithNoData {
+			withDataStatement = "with no data"
+		}
+
+		statements := []string{
+			fmt.Sprintf(`create materialized view %s with (timescaledb.continuous) as %s %s`,
+				pgx.Identifier{viewName}.Sanitize(),
+				viewSchema.Query,
+				withDataStatement),
+		}
+
+		return statements, nil
+	}
+
+	// create the views as a postgres view
+	// TODO
+	return nil, errors.New("not implemented")
+}
 
 func CreateTableStatements(tableName string, tableSchema *schemasv1alpha4.TimescaleDBTableSchema) ([]string, error) {
 	postgresSchema := toPostgresTableSchema(tableSchema)
@@ -26,7 +48,6 @@ func CreateTableStatements(tableName string, tableSchema *schemasv1alpha4.Timesc
 		if stmt != "" {
 			statements = append(statements, stmt)
 		}
-
 	}
 
 	// check for compression
@@ -65,7 +86,7 @@ func createRetentionStatements(tableName string, hypertable *schemasv1alpha4.Tim
 				return nil, errors.New("invalid interval")
 			}
 
-			stmt := fmt.Sprintf(`select add_retention_policy(%s, interval '%s'`, pgx.Identifier{tableName}.Sanitize(), hypertable.Retention.Interval)
+			stmt := fmt.Sprintf(`select add_retention_policy(%s, interval '%s')`, pgx.Identifier{tableName}.Sanitize(), hypertable.Retention.Interval)
 			stmts = append(stmts, stmt)
 		}
 	}
@@ -110,37 +131,6 @@ func toPostgresTableSchema(tableSchema *schemasv1alpha4.TimescaleDBTableSchema) 
 		IsDeleted:   tableSchema.IsDeleted,
 		Triggers:    tableSchema.Triggers,
 	}
-}
-
-func createHypertableStatement(tableName string, hypertable *schemasv1alpha4.TimescaleDBHypertable, columns []*schemasv1alpha4.PostgresqlTableColumn) (string, error) {
-	// if there isn't a time column name, abort
-	if hypertable.TimeColumnName == nil {
-		return "", nil
-	}
-
-	// if the time column name is not a column name, abort
-	if !columnExists(*hypertable.TimeColumnName, columns) {
-		return "", fmt.Errorf("cannot create hypertable on column %s because column not included in schema", *hypertable.TimeColumnName)
-	}
-
-	params, err := getHypertableParams(hypertable, columns)
-	if err != nil {
-		return "", errors.Wrap(err, "get hypertable params")
-	}
-
-	serializedParams := strings.Join(params, ", ")
-
-	stmt := fmt.Sprintf(`select create_hypertable(%s, %s`,
-		strings.ReplaceAll(pgx.Identifier{tableName}.Sanitize(), "\"", "'"),
-		strings.ReplaceAll(pgx.Identifier{*hypertable.TimeColumnName}.Sanitize(), "\"", "'"))
-
-	if len(serializedParams) > 0 {
-		stmt = fmt.Sprintf("%s, %s)", stmt, serializedParams)
-	} else {
-		stmt = fmt.Sprintf("%s)", stmt)
-	}
-
-	return stmt, nil
 }
 
 func SeedDataStatements(tableName string, tableSchema *schemasv1alpha4.TimescaleDBTableSchema, seedData *schemasv1alpha4.SeedData) ([]string, error) {

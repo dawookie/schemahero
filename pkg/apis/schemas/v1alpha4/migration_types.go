@@ -20,7 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// +kubebuilder:validation:Enum=PLANNED;APPROVED;EXECUTED;INVALID
+// +kubebuilder:validation:Enum=PLANNED;APPROVED;EXECUTED;INVALID;REJECTED
 type Phase string
 
 const (
@@ -28,6 +28,7 @@ const (
 	Approved Phase = "APPROVED"
 	Executed Phase = "EXECUTED"
 	Invalid  Phase = "INVALID"
+	Rejected Phase = "REJECTED"
 )
 
 // MigrationSpec defines the desired state of Migration

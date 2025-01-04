@@ -1,6 +1,6 @@
 
 SHELL := /bin/bash
-VERSION ?=`git describe --tags`
+VERSION ?= $(if $(GIT_TAG),$(GIT_TAG),$(shell git describe --tags))
 DATE=`date -u +"%Y-%m-%dT%H:%M:%SZ"`
 VERSION_PACKAGE = github.com/schemahero/schemahero/pkg/version
 GIT_TREE = $(shell git rev-parse --is-inside-work-tree 2>/dev/null)
@@ -142,17 +142,17 @@ bin/kubectl-schemahero:
 
 .PHONY: local
 local: bin/kubectl-schemahero manager
-	docker build -t schemahero/schemahero-manager -f ./Dockerfile.manager .
+	docker build -t schemahero/schemahero-manager -f ./Dockerfile.multiarch --target manager .
 	docker tag schemahero/schemahero-manager localhost:32000/schemahero/schemahero-manager:latest
 	docker push localhost:32000/schemahero/schemahero-manager:latest
 
 .PHONY: kind
 kind: bin/kubectl-schemahero manager
 
-.PHONY: contoller-gen
+.PHONY: controller-gen
 controller-gen:
 ifeq (, $(shell which controller-gen))
-	go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.7.0
+	go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.14.0
 CONTROLLER_GEN=$(shell go env GOPATH)/bin/controller-gen
 else
 CONTROLLER_GEN=$(shell which controller-gen)
@@ -183,22 +183,6 @@ ifeq (, $(shell which informer-gen))
 INFORMER_GEN=$(shell go env GOPATH)/bin/informer-gen
 else
 INFORMER_GEN=$(shell which informer-gen)
-endif
-
-.PHONY: sbom
-sbom: spdx-generator
-	mkdir -p sbom
-	$(SPDX_GENERATOR) -o ./sbom
-
-.PHONY: spdx-generator
-spdx-generator:
-ifeq (, $(shell which spdx-sbom-generator))
-	mkdir -p sbom
-	curl -L https://github.com/spdx/spdx-sbom-generator/releases/download/v0.0.10/spdx-sbom-generator-v0.0.10-linux-amd64.tar.gz -o ./sbom/spdx-sbom-generator-v0.0.10-linux-amd64.tar.gz
-	tar xzvf ./sbom/spdx-sbom-generator-v0.0.10-linux-amd64.tar.gz -C sbom
-SPDX_GENERATOR=./sbom/spdx-sbom-generator
-else
-SPDX_GENERATOR=$(shell which spdx-sbom-generator)
 endif
 
 .PHONY: release-tarballs
@@ -232,20 +216,20 @@ release-tarballs:
 
 	rm -rf ./kubectl-schemahero
 
-.PHONY: release
-release: release-tarballs
-	# build the docker images for in-cluster
+.PHONY: build-manager
+build-manager:
+	CGO_ENABLED=0 make bin/manager
 
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make bin/manager
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make bin/kubectl-schemahero
-	docker build -t schemahero/schemahero:${GITHUB_TAG} -f ./deploy/Dockerfile.schemahero .
-	docker build -t schemahero/schemahero-manager:${GITHUB_TAG} -f ./deploy/Dockerfile.manager .
-	docker push schemahero/schemahero:${GITHUB_TAG}
-	docker push schemahero/schemahero-manager:${GITHUB_TAG}
-	cosign attach sbom -sbom ./sbom/bom-go-mod.spdx schemahero/schemahero:${GITHUB_TAG}
-	cosign attach sbom -sbom ./sbom/bom-go-mod.spdx schemahero/schemahero-manager:${GITHUB_TAG}
-	cosign sign -key ./cosign.key schemahero/schemahero:${GITHUB_TAG}
-	cosign sign -key ./cosign.key schemahero/schemahero-manager:${GITHUB_TAG}
+.PHONY: build-schemahero
+build-schemahero:
+	CGO_ENABLED=0 GOOS=linux make bin/kubectl-schemahero
+
+.PHONY: cosign-sign
+cosign-sign:
+	# cosign attach sbom --sbom ./sbom/bom-go-mod.spdx ${DIGEST_SCHEMAHERO}
+	# cosign attach sbom --sbom ./sbom/bom-go-mod.spdx ${DIGEST_SCHEMAHERO_MANAGER}
+	cosign sign --yes --key ./cosign.key ${DIGEST_SCHEMAHERO}
+	cosign sign --yes --key ./cosign.key ${DIGEST_SCHEMAHERO_MANAGER}
 
 .PHONY: scan
 scan:

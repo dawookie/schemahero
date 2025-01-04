@@ -9,12 +9,14 @@ import (
 	databasecontroller "github.com/schemahero/schemahero/pkg/controller/database"
 	migrationcontroller "github.com/schemahero/schemahero/pkg/controller/migration"
 	tablecontroller "github.com/schemahero/schemahero/pkg/controller/table"
+	viewcontroller "github.com/schemahero/schemahero/pkg/controller/view"
 	"github.com/schemahero/schemahero/pkg/logger"
 	"github.com/schemahero/schemahero/pkg/version"
 	"github.com/schemahero/schemahero/pkg/webhook"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 )
@@ -49,11 +51,14 @@ func RunCmd() *cobra.Command {
 
 			// Create a new Cmd to provide shared dependencies and start components
 			options := manager.Options{
-				MetricsBindAddress: v.GetString("metrics-addr"),
+				HealthProbeBindAddress: v.GetString("metrics-addr"),
 			}
 
 			if v.GetString("namespace") != "" {
-				options.Namespace = v.GetString("namespace")
+				if options.Cache.DefaultNamespaces == nil {
+					options.Cache.DefaultNamespaces = make(map[string]cache.Config)
+				}
+				options.Cache.DefaultNamespaces[v.GetString("namespace")] = cache.Config{}
 			}
 
 			mgr, err := manager.New(cfg, options)
@@ -84,6 +89,11 @@ func RunCmd() *cobra.Command {
 				}
 
 				if err := tablecontroller.Add(mgr, v.GetStringSlice("database-name")); err != nil {
+					logger.Error(err)
+					os.Exit(1)
+				}
+
+				if err := viewcontroller.Add(mgr, v.GetStringSlice("database-name")); err != nil {
 					logger.Error(err)
 					os.Exit(1)
 				}
